@@ -1,4 +1,8 @@
-"""Council mode: answer -> prune (A) -> review -> draft synthesis -> adjudicate (B) -> final."""
+"""Council mode.
+
+answer -> agreement -> prune (A) -> review -> draft synthesis -> adjudicate (B) -> final.
+Checkpoint A may send the run straight from prune to draft synthesis (skip review).
+"""
 
 from __future__ import annotations
 
@@ -17,6 +21,8 @@ class AnswerStage:
     """Stage 1: every member answers independently, in parallel.
 
     Artifact: ``dict[label, Stage1Answer]`` keyed by freshly shuffled anonymous labels.
+    Members matching the chair are dropped when ``chairman_excluded`` is set. Answers
+    are passed through ``llm_crossjury.core.anonymize.scrub`` before storage.
     """
 
     name = "answer"
@@ -31,7 +37,8 @@ class AnswerStage:
 class ReviewStage:
     """Stage 2: anonymous peer review under the configured topology.
 
-    Artifact: ``list[PeerReview]``.
+    Artifact: ``list[PeerReview]``. Reasoning effort defaults to LOW. Rankings are
+    aggregated with ``llm_crossjury.core.orchestrator.ranking.borda_aggregate``.
     """
 
     name = "review"

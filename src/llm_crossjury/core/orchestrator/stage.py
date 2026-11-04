@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
-from llm_crossjury.core.orchestrator.checkpoint import CheckpointKind
+from llm_crossjury.core.orchestrator.checkpoint import AgreementSummary, CheckpointKind
 
 if TYPE_CHECKING:
     from llm_crossjury.core.cost.estimate import CallPlan
@@ -18,6 +18,7 @@ class StageName(StrEnum):
     """Canonical stage names used as artifact keys and ledger tags."""
 
     ANSWER = "answer"
+    AGREEMENT = "agreement"
     PRUNE = "prune"
     REVIEW = "review"
     DRAFT_SYNTHESIS = "draft_synthesis"
@@ -51,8 +52,13 @@ class CheckpointStage:
         name: Stage name (artifact key for the decision).
         kind: Which checkpoint this is.
         candidates: Computes the items the user decides on from the context.
+        agreement: Checkpoint A only: builds the agreement summary from the context.
+        skip_review_to: Checkpoint A only: stage to jump to when the user sets
+            ``PruneDecision.skip_review``.
     """
 
     name: str
     kind: CheckpointKind
     candidates: Callable[[RunContext], Sequence[str]]
+    agreement: Callable[[RunContext], AgreementSummary | None] | None = None
+    skip_review_to: str | None = None

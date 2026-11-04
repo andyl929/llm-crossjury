@@ -1,7 +1,7 @@
 """The pipeline: runs stages in order, pauses at checkpoints, consults hooks.
 
 ``run``/``resume`` contain only the minimal control flow needed for the skeleton
-smoke test (sequencing, pause, resume, hook actions). Persistence, concurrency
+smoke test (sequencing, pause, resume, skip-review, hook actions). Persistence, concurrency
 limits, retries, ledger wiring and estimation are implementation-phase work.
 """
 
@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from llm_crossjury.core.cost.estimate import CostEstimate
-from llm_crossjury.core.orchestrator.checkpoint import CheckpointRequest, UserDecision
+from llm_crossjury.core.orchestrator.checkpoint import (
+    CheckpointRequest,
+    PruneDecision,
+    UserDecision,
+)
 from llm_crossjury.core.orchestrator.context import RunContext
 from llm_crossjury.core.orchestrator.hooks import HookAction, PipelineHook
 from llm_crossjury.core.orchestrator.stage import CheckpointStage, Stage
@@ -78,22 +82,30 @@ class Pipeline:
                         kind=stage.kind,
                         stage_name=stage.name,
                         candidates=tuple(stage.candidates(ctx)),
+                        agreement=stage.agreement(ctx) if stage.agreement else None,
                         created_at=datetime.now(UTC),
                     )
                     return Paused(ctx, request)
-                ctx.artifacts[stage.name] = ctx.decisions[stage.kind]
+                decision = ctx.decisions[stage.kind]
+                ctx.artifacts[stage.name] = decision
                 ctx.cursor += 1
+                if (
+                    isinstance(decision, PruneDecision)
+                    and decision.skip_review
+                    and stage.skip_review_to is not None
+                ):
+                    ctx.cursor = self._index_of(stage.skip_review_to)
                 continue
 
             ctx.artifacts[stage.name] = await stage.run(ctx)
             ctx.cursor += 1
 
             for hook in self.hooks:
-                decision = hook.after_stage(stage.name, ctx)
-                if decision.action is HookAction.ABORT:
-                    return Stopped(ctx, decision.reason)
-                if decision.action is HookAction.SKIP_TO:
-                    ctx.cursor = self._index_of(decision.target)
+                hook_decision = hook.after_stage(stage.name, ctx)
+                if hook_decision.action is HookAction.ABORT:
+                    return Stopped(ctx, hook_decision.reason)
+                if hook_decision.action is HookAction.SKIP_TO:
+                    ctx.cursor = self._index_of(hook_decision.target)
                     break
         return Completed(ctx)
 

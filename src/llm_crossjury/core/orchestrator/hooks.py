@@ -1,4 +1,8 @@
-"""Hooks evaluated after every stage, including early stopping (ADR 0003)."""
+"""Hooks evaluated after every model stage (ADR 0003).
+
+There is deliberately no automatic early-stop hook: skipping peer review is a user
+decision at checkpoint A, informed by the agreement ratio (see ``agreement``).
+"""
 
 from __future__ import annotations
 
@@ -14,7 +18,7 @@ if TYPE_CHECKING:
 class HookAction(StrEnum):
     CONTINUE = "continue"
     SKIP_TO = "skip_to"
-    """Jump forward to ``HookDecision.target`` (e.g. skip review when answers agree)."""
+    """Jump forward to ``HookDecision.target``."""
     ABORT = "abort"
     """Stop the run; artifacts produced so far are kept."""
 
@@ -43,20 +47,6 @@ class BudgetGuard:
     """
 
     def __init__(self, ledger: Ledger, budget: Budget) -> None:
-        raise NotImplementedError
-
-    def after_stage(self, stage_name: str, ctx: RunContext) -> HookDecision:
-        raise NotImplementedError
-
-
-class AgreementEarlyStop:
-    """Skips peer review when stage-1 answers already agree.
-
-    Agreement is judged on the members' ``claims`` (not on prose). The threshold and
-    the method are configuration; see SPEC Open Questions.
-    """
-
-    def __init__(self, threshold: float, skip_to: str) -> None:
         raise NotImplementedError
 
     def after_stage(self, stage_name: str, ctx: RunContext) -> HookDecision:

@@ -21,6 +21,8 @@ class RunContext:
         decisions: User decisions keyed by checkpoint kind.
         labels: Anonymous label -> member id. Never shown to members or the chair.
         cursor: Index of the next stage to execute.
+        auto: ``--auto`` run: checkpoints are decided automatically (keep all, do not
+            skip review, defer every dispute to the chair) and flagged as such.
     """
 
     run_id: str
@@ -30,12 +32,14 @@ class RunContext:
     decisions: dict[CheckpointKind, UserDecision] = field(default_factory=dict)
     labels: dict[str, str] = field(default_factory=dict)
     cursor: int = 0
+    auto: bool = False
 
     def to_snapshot(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dict for the checkpoint store.
 
-        Honors ``store_content``: when false, answer/review text is replaced by
-        content hashes and the snapshot is resumable only within the same process.
+        Snapshots always include the content needed to resume (temporary storage,
+        deleted on completion or after the retention period); ``store_content``
+        only governs the permanent run record.
         """
         raise NotImplementedError
 

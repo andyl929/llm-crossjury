@@ -6,6 +6,9 @@ With ``n`` kept answers:
 * ``RING``: member ``i`` reviews answer ``i + 1 (mod n)``, optionally ``k`` steps.
   ``n * k`` reviews.
 * ``SINGLE_JUDGE``: one designated judge reviews all answers in one call. ``1`` call.
+
+Default when not configured (``llm_crossjury.core.config.resolve_topology``):
+``FULL`` for <= 3 reviewed answers, ``RING`` with ``k = 1`` for >= 4.
 """
 
 from __future__ import annotations

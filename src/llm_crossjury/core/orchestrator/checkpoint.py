@@ -3,7 +3,9 @@
 Two checkpoints exist (SPEC section 4):
 
 * ``PRUNE_ANSWERS`` (A): after stage 1, the user drops answers that should not go on
-  to peer review and synthesis.
+  to peer review and synthesis, and decides whether to skip peer review. The request
+  carries the claim-agreement ratio and the estimated saving of skipping review;
+  nothing is skipped automatically.
 * ``ADJUDICATE_DISPUTES`` (B): after the draft synthesis, the user rules on each
   disputed point before the chair writes the final text.
 
@@ -14,6 +16,7 @@ the strict-subset rules of ADR 0001 do not apply to them.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Protocol
@@ -26,6 +29,32 @@ class CheckpointKind(StrEnum):
     ADJUDICATE_DISPUTES = "adjudicate_disputes"
 
 
+class DecidedBy(StrEnum):
+    """Who made a checkpoint decision. Shown in every output that depends on it."""
+
+    USER = "user"
+    AUTO = "auto"
+    """Made under ``--auto``; outputs flag every auto-decided item."""
+
+
+class AgreementSummary(BaseModel):
+    """Claim agreement among stage-1 answers, for checkpoint A."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    ratio: float | None
+    """Share of claim groups supported by every kept answer with no contradiction;
+    ``None`` if the measurement was disabled or failed."""
+    judge_model: str | None
+    threshold: float | None
+    recommend_skip: bool
+    """``ratio >= threshold`` (always ``False`` when either is ``None``)."""
+    review_cost_low: Decimal | None
+    review_cost_high: Decimal | None
+    """Estimated cost of the peer-review stage, i.e. the saving if it is skipped."""
+    currency: str
+
+
 class CheckpointRequest(BaseModel):
     """What the user is asked at a checkpoint."""
 
@@ -36,6 +65,8 @@ class CheckpointRequest(BaseModel):
     stage_name: str
     candidates: tuple[str, ...]
     """Anonymous labels (A) or dispute ids (B) the user decides on."""
+    agreement: AgreementSummary | None
+    """Checkpoint A only."""
     created_at: datetime
 
 
@@ -47,6 +78,9 @@ class PruneDecision(BaseModel):
     kind: Literal[CheckpointKind.PRUNE_ANSWERS] = CheckpointKind.PRUNE_ANSWERS
     drop: tuple[str, ...]
     """Anonymous labels to remove. Empty means keep all."""
+    skip_review: bool = False
+    """Skip peer review and go straight to the draft synthesis."""
+    decided_by: DecidedBy = DecidedBy.USER
     note: str | None = None
 
 
@@ -72,6 +106,8 @@ class Ruling(BaseModel):
     """Required iff ``choice`` is ``ADOPT_POSITION``."""
     text: str | None = None
     """Required iff ``choice`` is ``CUSTOM``."""
+    decided_by: DecidedBy = DecidedBy.USER
+    """Under ``--auto`` every ruling is ``DEFER_TO_CHAIR`` with ``AUTO``."""
 
 
 class AdjudicationDecision(BaseModel):
@@ -98,9 +134,23 @@ class CheckpointStore(Protocol):
 
     def list_paused(self) -> list[CheckpointRequest]: ...
 
+    def delete(self, run_id: str) -> None:
+        """Remove a snapshot and its content (called when the run completes)."""
+        ...
+
+    def purge_expired(self, now: datetime, retention_days: int) -> list[str]:
+        """Delete snapshots older than ``retention_days``; return their run ids."""
+        ...
+
 
 class FileCheckpointStore:
-    """:class:`CheckpointStore` writing JSON files under the user data directory."""
+    """:class:`CheckpointStore` writing JSON files under the user data directory.
+
+    Snapshots of unfinished runs include prompt/response content even when
+    ``store_content`` is false, so a run can be resumed from another process. That
+    content is temporary: it is deleted when the run completes and purged after
+    ``checkpoint_retention_days`` (default 7) otherwise.
+    """
 
     def __init__(self, root: Path) -> None:
         raise NotImplementedError
@@ -112,4 +162,10 @@ class FileCheckpointStore:
         raise NotImplementedError
 
     def list_paused(self) -> list[CheckpointRequest]:
+        raise NotImplementedError
+
+    def delete(self, run_id: str) -> None:
+        raise NotImplementedError
+
+    def purge_expired(self, now: datetime, retention_days: int) -> list[str]:
         raise NotImplementedError

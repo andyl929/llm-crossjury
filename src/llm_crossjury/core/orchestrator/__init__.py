@@ -2,9 +2,11 @@
 
 from llm_crossjury.core.orchestrator.checkpoint import (
     AdjudicationDecision,
+    AgreementSummary,
     CheckpointKind,
     CheckpointRequest,
     CheckpointStore,
+    DecidedBy,
     FileCheckpointStore,
     PruneDecision,
     Ruling,
@@ -13,7 +15,6 @@ from llm_crossjury.core.orchestrator.checkpoint import (
 )
 from llm_crossjury.core.orchestrator.context import RunContext
 from llm_crossjury.core.orchestrator.hooks import (
-    AgreementEarlyStop,
     BudgetGuard,
     HookAction,
     HookDecision,
@@ -36,13 +37,14 @@ from llm_crossjury.core.orchestrator.topology import (
 
 __all__ = [
     "AdjudicationDecision",
-    "AgreementEarlyStop",
+    "AgreementSummary",
     "BudgetGuard",
     "CheckpointKind",
     "CheckpointRequest",
     "CheckpointStage",
     "CheckpointStore",
     "Completed",
+    "DecidedBy",
     "FileCheckpointStore",
     "HookAction",
     "HookDecision",
