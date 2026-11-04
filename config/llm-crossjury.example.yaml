@@ -1,12 +1,14 @@
 # Example run configuration. Copy to llm-crossjury.yaml and edit. This file holds no
 # secrets (keys come from the environment only). Model ids are placeholders: fill
-# them from each vendor's documentation.
+# them from each vendor's documentation. Every value below other than members/chair
+# shows the built-in default.
 
 members:
   - id: claude
     provider: anthropic
     model: "<anthropic model id>"
     backend: api
+    reasoning_effort: default   # low | medium | high | default
   - id: gpt
     provider: openai
     model: "<openai model id>"
@@ -25,23 +27,37 @@ chair:
   provider: anthropic
   model: "<anthropic model id>"
   backend: api
+chairman_excluded: false   # true: drop members identical to the chair
 
 review:
-  topology: full          # full | ring | single_judge
+  topology: null            # null = auto (full <= 3 answers, ring >= 4) | full | ring | single_judge
   ring_k: 1
-  judge: null             # member id for single_judge
+  judge: null               # member id for single_judge
+  reasoning_effort: low
 
-budget:
-  limit: "2.00"
+agreement:                  # shown at checkpoint A; never skips review by itself
+  enabled: true
+  judge: null               # a cheap model: {id, provider, model, backend}
+  reasoning_effort: low
+  threshold: null           # recommend skipping review at/above this ratio (TBD by evaluation)
+
+budget:                     # printed at the start of every run
+  run_limit: "1.00"
+  confirm_above: "0.25"
+  daily_limit: "5.00"
   currency: USD
-  allow_unknown_cost: false
-  confirm_above: "0.50"
+  allow_unknown_cost: false # must be true to use any cli-backend member
 
 cost:
   use_prompt_cache: true
   use_batch: false
-  early_stop_agreement: null   # e.g. 0.9 to skip review when answers agree
 
+document:
+  max_document_tokens: 50000  # hard limit (estimated); provisional default
+  markdown_chunk_depth: 2     # '#' and '##' start chunks; LaTeX: \chapter, \section
+
+output_language: null       # null = follow the input language; e.g. "de"
 pricing_path: config/pricing.yaml
-store_content: false      # true: keep prompts/responses in the user data dir
-data_dir: null            # override platformdirs location
+store_content: false        # true: keep prompts/responses in permanent run records
+checkpoint_retention_days: 7
+data_dir: null              # override platformdirs location

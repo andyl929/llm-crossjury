@@ -6,7 +6,8 @@ Layout under ``platformdirs.user_data_dir("llm-crossjury", appauthor=False)``
     ledger.sqlite3              cost ledger (never contains prompt/response text)
     runs/<run_id>/run.json      run record: config snapshot, stages, labels, costs
     runs/<run_id>/content/      prompts and responses (only if store_content: true)
-    checkpoints/<run_id>.json   paused-run snapshots
+    checkpoints/<run_id>/       paused-run snapshot incl. content (temporary: deleted
+                                on completion or after checkpoint_retention_days)
 """
 
 from __future__ import annotations

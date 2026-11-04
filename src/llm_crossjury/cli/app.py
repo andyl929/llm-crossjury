@@ -42,7 +42,7 @@ PresetOpt = Annotated[
 ]
 BudgetOpt = Annotated[
     str | None,
-    typer.Option("--budget", help="Override budget limit, as a decimal in the config currency."),
+    typer.Option("--budget", help="Override the per-run limit (decimal, config currency)."),
 ]
 
 
@@ -64,8 +64,24 @@ def run(
             help="At a checkpoint, save the run and exit instead of prompting.",
         ),
     ] = False,
+    auto: Annotated[
+        bool,
+        typer.Option(
+            "--auto",
+            help="Decide checkpoints automatically (keep all, defer disputes to the chair). "
+            "Every auto-decided item is flagged in the output.",
+        ),
+    ] = False,
+    output_language: Annotated[
+        str | None,
+        typer.Option("--output-language", help="BCP 47 tag; default follows the input language."),
+    ] = None,
 ) -> None:
-    """Estimate, confirm, then run a task in the chosen mode."""
+    """Estimate, confirm, then run a task in the chosen mode.
+
+    Always prints the effective budget (run limit, confirmation threshold, daily
+    limit and today's spend) before the estimate.
+    """
     raise NotImplementedError
 
 

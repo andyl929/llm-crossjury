@@ -1,9 +1,10 @@
 """Price table loaded from ``config/pricing.yaml``.
 
 Prices are NEVER hard-coded or guessed. Every entry carries the URL it was taken
-from and the date it was last checked against that URL. A model with no entry
-cannot be estimated, and a run that needs it is refused (unless the user explicitly
-allows unpriced models, in which case its cost is reported as unknown).
+from and the date it was last checked against that URL. An ``api`` model with no
+entry cannot be estimated, and a run that needs it is always refused;
+``allow_unknown_cost`` does not override this (it only admits ``cli`` members, whose
+per-call cost is unknowable).
 """
 
 from __future__ import annotations
