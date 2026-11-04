@@ -2,11 +2,12 @@
 
 - Status: Accepted (the backend itself is *experimental*)
 - Date: 2026-11-04
+- Amended: 2026-11-04 (Grok Build CLI no longer pre-skipped)
 
 ## Context
 
 Many users pay for vendor subscriptions that come with an official CLI (`claude`,
-`codex`, `gemini`, and possibly `grok`). Using those CLIs as members saves
+`codex`, `gemini`, and xAI's Grok Build CLI `grok`). Using those CLIs as members saves
 API spend. These CLIs are agentic tools, though. They can read files, run commands
 and edit code, and they keep OAuth tokens or cookies in the user's profile. llm-crossjury
 must get model output from them **without** becoming a credential-handling tool and
@@ -44,7 +45,13 @@ must get model output from them **without** becoming a credential-handling tool 
 8. **Redaction.** Stderr and error messages pass through the redactor before they
    are shown or logged.
 9. **Usage reported honestly.** Fields the CLI does not report are `None`. Cost is
-   unknown unless the user opts in (SPEC §5).
+   unknown, so a `cli` member is only allowed with an explicit
+   `allow_unknown_cost: true`. The ledger still records the number of CLI calls and
+   their wall-clock duration (SPEC §5).
+10. **The CLI's own login only.** Some CLIs also accept an API key from the
+   environment (the Grok Build CLI accepts `XAI_API_KEY`). Because `*_API_KEY` is never
+   forwarded (rule 4), the `cli` backend always runs on the user's own CLI login. API
+   keys are used only by the `api` backend.
 
 ### What llm-crossjury never does
 
@@ -78,9 +85,9 @@ recorded in its adapter's `skipped_reason` and in this ADR's table:
 | `claude` | Planned | Each condition to be verified against current official docs during implementation |
 | `codex` | Planned | Same |
 | `gemini` | Planned | Same |
-| `grok` | **Skipped (pending S1)** | It has not been verified that an official xAI CLI exists and meets S2–S7. Grok stays available through the `api` backend. Revisit when verified (SPEC Open Questions) |
+| `grok` | Planned (evaluate in phase 1B) | xAI's official **Grok Build CLI**, command `grok`, which supports subscription login and `XAI_API_KEY`. S1 is satisfied. S2–S7 are evaluated in phase 1B; the key path is excluded by rule 10 |
 
-The statuses above are design intent. Each "Planned" entry must be re-checked
+The statuses above are design intent. No CLI is skipped in advance. Each "Planned" entry must be re-checked
 against the vendor's current documentation before its adapter is implemented, and
 moved to "Skipped" with a reason if any condition fails.
 

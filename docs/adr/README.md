@@ -9,5 +9,6 @@
 | [0005](0005-clean-room-and-license.md) | Clean-room implementation and MIT license | Accepted |
 
 Each ADR has these sections: Status, Context, Decision, Consequences, Alternatives.
-ADRs are not rewritten once accepted. To change a decision, write a new ADR that
-supersedes the old one.
+A decision that is replaced entirely gets a new ADR that supersedes the old one.
+Amendments that the maintainer approves are made in place and dated in the
+`Amended:` line.

@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-04
+- Amended: 2026-11-04 (pre-phase-1 decisions; see SPEC §10 Decided)
 
 ## Context
 
@@ -28,11 +29,17 @@ Schema for structured output.
 3. **`Usage` has five counters**: input, cached_input, cache_write, output, reasoning.
    Each is `int | None`, and **`None` means unknown, never zero**. Cost computation
    returns `None` (unknown) instead of guessing.
-4. **Capabilities are declared per model.** There are four flags: `structured_output`,
-   `caching`, `batch`, `temperature`. The orchestrator uses only declared
-   capabilities and otherwise falls back (format instructions plus validation;
-   sequential calls; temperature ignored and recorded as ignored).
-5. **Errors never carry secrets.** The error types are `ProviderUnavailableError`,
+4. **Capabilities are declared per model.** There are five flags: `structured_output`,
+   `caching`, `batch`, `temperature`, `reasoning_effort`. The orchestrator uses only
+   declared capabilities and otherwise falls back (format instructions plus
+   validation; sequential calls; temperature or effort ignored and recorded as
+   ignored).
+5. **Reasoning effort is provider-neutral.** `CompletionRequest.reasoning_effort` is
+   one of `low | medium | high | default`. Each adapter maps it internally to its
+   vendor's controls (effort levels, thinking budgets). `default` sends no setting.
+   Stages choose the effort level: peer review and the agreement judge use `low` by
+   default, and members use their configured level.
+6. **Errors never carry secrets.** The error types are `ProviderUnavailableError`,
    `CapabilityNotSupportedError` and `ProviderError`.
 
 ### Structured-output schema convention (`core/schemas/`)
@@ -52,7 +59,10 @@ vendors accept, so that one canonical schema works everywhere:
 6. **No value constraints in the schema** (min/max, length, pattern, format). Range
    and permutation checks are done by Python validators after parsing.
 7. **Field order is generation order.** Evidence comes before judgment (quote →
-   problem → severity; issues → strengths → rationale → score → ranking).
+   problem → severity; issues → strengths → ranking rationale → ranking).
+   Reviews carry **no numeric scores**. Rankings are aggregated in code (Borda), and
+   so is the agreement ratio (from `AgreementJudgment` groups). Models are never
+   asked to produce numbers that the code can compute itself.
 8. Field docstrings become schema `description`s, so they are written as plain text
    addressed to the model.
 

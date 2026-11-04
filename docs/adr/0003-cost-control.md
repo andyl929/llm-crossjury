@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-04
+- Amended: 2026-11-04 (pre-phase-1 decisions; see SPEC §10 Decided)
 
 ## Context
 
@@ -17,37 +18,59 @@ by design. Prices change often, and anything hard-coded or remembered goes stale
 - `config/pricing.yaml` is the single source. Every entry has `source_url` and
   `last_verified`. The repository ships with **no entries**. There are no built-in
   defaults and no prices filled from memory.
-- A model without an entry is unpriceable. The run is refused unless
-  `allow_unknown_cost: true`, in which case its calls are counted as unknown.
+- An `api` model without an entry is unpriceable, and the run is **refused**. There
+  is no override.
+- `cli` members have unknowable per-call cost. They require an explicit
+  `allow_unknown_cost: true`, and the ledger records their call count and duration.
 - Reports warn about entries older than a configurable age.
 
-### 2. Estimate before the run
+### 2. Built-in budget defaults
+
+| Limit | Default | Scope |
+|---|---|---|
+| `run_limit` | $1.00 | one run (hard) |
+| `confirm_above` | $0.25 | ask before a run whose high estimate exceeds this |
+| `daily_limit` | $5.00 | all runs on the local calendar day (hard) |
+
+The effective values and today's spend are printed at the start of every run.
+
+### 3. Estimate before the run
 
 - Each stage implements `plan(ctx) → [CallPlan]`. The estimator prices the plan as a
   **range**: input tokens come from vendor counting where available and a heuristic
   otherwise; output uses low/high bounds per stage; cache hits are assumed for calls
   sharing a `prefix_fingerprint` on providers that support caching.
-- The run is refused if `total_high > budget.limit`. The user is asked to confirm if
-  `total_high > confirm_above`.
+- The run is refused if `total_high` exceeds the run limit or the remaining daily
+  budget. The user is asked to confirm if `total_high > confirm_above`.
+- Document Review estimates one stage-1 call per (member, chunk), with the whole
+  document as a cached prefix (§7).
 
-### 3. Account during the run, and stop on budget
+### 4. Account during the run, and stop on budget
 
-- Before each call: `Ledger.check(spent + reserved + call_high ≤ limit)`. If it fails,
-  the call is not started. In-flight calls hold a reservation, which is released when
+- Before each call: `Ledger.check(spent + reserved + call_high)` against both the run
+  limit and the daily limit. If either check fails, the call is not started. In-flight calls hold a reservation, which is released when
   the call is recorded.
 - After each call: a `LedgerEntry` is written immediately (SQLite, no content).
 - After each stage: the `BudgetGuard` hook aborts if the budget is exhausted.
   Artifacts are kept, and the run ends as `Stopped("budget")`.
 
-### 4. Early stopping
+### 5. Early stopping is a user decision
 
-- `AgreementEarlyStop`: if the stage-1 claims agree at or above a threshold, skip peer
-  review and go straight to the draft synthesis. This is off by default (see SPEC
-  Open Questions).
+- Nothing is skipped automatically. After stage 1, a **cheap judge model** (reasoning
+  effort `low`) groups all claims into an `AgreementJudgment`. The code computes the
+  agreement ratio: groups that every kept answer supports and none contradicts,
+  divided by all groups.
+- Checkpoint A shows the ratio, the estimated cost of peer review (the saving if it is
+  skipped), and a "consider skipping" hint when the ratio is at or above
+  `agreement.threshold`. The threshold is configurable; its default is set in the
+  evaluation phase. The user decides with `PruneDecision.skip_review`.
+- The judge call is itself estimated and budgeted. It is skipped when no judge is
+  configured or fewer than two answers exist.
 - Checkpoint A is also a cost lever: pruned answers are neither reviewed nor synthesized.
 - If only one answer survives, review is skipped.
+- Under `--auto`, review is never skipped.
 
-### 5. Review topology
+### 6. Review topology
 
 | Topology | Review calls (n kept) | Use when |
 |---|---|---|
@@ -55,11 +78,14 @@ by design. Prices change often, and anything hard-coded or remembered goes stale
 | `ring` | n·k | Larger councils. Every answer still gets k independent reviews |
 | `single_judge` | 1 | Cheapest. One judge reviews everything (weaker independence) |
 
+Default (no topology configured): `full` for ≤ 3 reviewed answers, `ring` with
+k = 1 for ≥ 4. Peer review runs at reasoning effort `low` by default.
+
 The implementation sends **one call per reviewer, carrying all of that reviewer's
 targets** (`ReviewAssignment.targets`). This keeps the call count at n for `full`
 while the token count still grows with n·(n−1).
 
-### 6. Prompt-cache prefixes
+### 7. Prompt-cache prefixes
 
 - Stages are designed so that many calls share one `stable_prefix`: the same system
   prompt plus task for all stage-1 calls, and the same system prompt plus task plus
@@ -68,8 +94,12 @@ while the token count still grows with n·(n−1).
   `variable_suffix`.
 - Calls sharing a prefix are sequenced so that the first one warms the cache before
   the rest fan out *(planned)*, where the vendor's caching needs that.
+- Document chunking keeps the **whole document** in the stable prefix and puts only
+  the chunk id in the suffix. Per-member chunk calls therefore share one cached
+  prefix, while output stays bounded per call. `document.max_document_tokens` is a
+  hard limit, checked before any call.
 
-### 7. Batch processing
+### 8. Batch processing
 
 - If `cost.use_batch` is on and the provider declares `batch`, a stage's independent
   calls are submitted as one batch and priced with `batch_multiplier` from the price

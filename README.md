@@ -2,22 +2,28 @@
 
 > Status: **design / skeleton phase.** Nothing runs against real models yet.
 
-`llm-crossjury` sends one task to several LLMs (Claude, OpenAI, Gemini, Grok). Each one
-answers on its own. Then they review each other's answers without knowing who
+`llm-crossjury` sends one task to several LLMs (Claude, OpenAI, Gemini, Grok). Each
+one answers on its own. Then they review each other's answers without knowing who
 wrote which. A *chair* model combines the results, and any point where the models
 still **disagree** comes back to you to decide.
 
 It is built for general professional work. It ships with a **Document Review**
 mode that returns a list of proposed edits instead of a rewritten document.
-Academic paper revision is one preset of that mode.
+Academic paper revision (in any language) is one preset of that mode.
 
 ## Modes
 
 | Mode | What you get |
 |---|---|
 | `compare` | Independent answers side by side, with a cost breakdown |
-| `council` | Answers → you prune weak ones → anonymous peer review → chair synthesis → you settle the disputes → final answer |
+| `council` | Answers → you see how much they agree, prune weak ones, and may skip review → anonymous peer review (issues and rankings) → chair synthesis → you settle the disputes → final answer |
 | `document-review` | Same flow, applied to a Markdown or LaTeX file. The output is an **edit list**: location, original, replacement, reason, category |
+
+```bash
+llm-crossjury run "Should we shard by tenant or by region?" --mode council
+llm-crossjury run --mode document-review --input paper.tex --preset paper
+llm-crossjury cost estimate --mode document-review --input paper.tex
+```
 
 ## Backends
 
@@ -29,9 +35,11 @@ Academic paper revision is one preset of that mode.
 ## Cost is a first-class concern
 
 Every run is estimated before it starts and recorded in a ledger while it runs.
-A run stops when it hits your budget. Prices come **only** from
-[`config/pricing.yaml`](config/pricing.yaml), and every entry there carries a
-`source_url` and a `last_verified` date.
+The built-in limits are $1.00 per run and $5.00 per day, and anything over $0.25
+needs your confirmation. These limits are printed at the start of every run. Prices
+come **only** from [`config/pricing.yaml`](config/pricing.yaml), where every entry
+carries a `source_url` and a `last_verified` date. If a model has no entry, the run
+is refused.
 
 ## Development
 

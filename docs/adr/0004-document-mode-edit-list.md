@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-04
+- Amended: 2026-11-04 (merge policy and chunking decided)
 
 ## Context
 
@@ -13,8 +14,21 @@ rewritten document or a list of discrete proposed edits.
 
 Document Review returns an **`EditList`**. Each `Edit` has `location` (section, lines,
 occurrence), verbatim `original`, `replacement`, `reason`, `category` and `severity`.
-The chair merges the members' lists into a `DocumentSynthesis`, and conflicting edits
-become **disputes** for checkpoint B. llm-crossjury can render accepted edits as a unified
+Before the chair runs, a **deterministic merge** combines the members' lists:
+
+- edits that are identical (same span, same replacement) are merged, keeping every
+  proposing label;
+- edits whose spans do not overlap are merged as they are;
+- edits that overlap with different replacements become an `EditConflict`. Each
+  conflict is one **disputed point** at checkpoint B, with one position per label.
+  Under `--auto` the chair decides, and every such decision is flagged
+  (`decided_by = auto`) in the edit table and the diff header.
+
+The chair then writes the `DocumentSynthesis` (summary, unique insights, assessments
+of conflicts). It does not re-merge the edits.
+
+Long documents are chunked at Markdown headings or LaTeX `\section` (ADR 0003 §7).
+`location.section` records the chunk heading. llm-crossjury can render accepted edits as a unified
 diff, but it never overwrites the input file.
 
 ## Rationale
@@ -44,7 +58,8 @@ diff, but it never overwrites the input file.
   `summary`.
 - `original` must be quoted exactly. Prompts must stress this, and validation must
   flag misses.
-- Overlapping edits need a conflict policy (SPEC Open Questions).
+- Overlap is decided on character spans in the source, so edits must be locatable
+  (`validate_edits`). Unlocatable edits are reported, never merged.
 
 ## Alternatives considered
 
