@@ -44,3 +44,14 @@ _None._
   id. Reasoning mapping moved from adapters to the ModelResolver.
 - `schemas/__main__.py`: also writes the config-file schemas to `schemas/config/`.
 - Status: done
+
+### CI-3: Naming and per-model multipliers (approved by the maintainer, 2026-11-04)
+- `providers/base.py`: `CompletionRequest.reasoning_effort` renamed to `reasoning`
+  (matching `MemberConfig.reasoning`), and `Capabilities.reasoning_effort` renamed to
+  `Capabilities.reasoning`. The `ReasoningEffort` enum keeps its name. No
+  structured-output schema is affected (`providers/base.py` is not exported).
+- `registry/schema.py`: new `ModelEntry.reasoning_multipliers:
+  dict[ReasoningEffort, float] | None`, a per-model, per-level override of
+  `cost.reasoning_multipliers`. `schemas/config/ModelRegistryFile.schema.json` was
+  regenerated.
+- Status: done

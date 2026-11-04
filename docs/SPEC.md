@@ -180,9 +180,11 @@ Paused runs can be resumed from another process (§7, storage).
 - **CLI backend:** per-call cost is unknowable. Any `cli` member requires an explicit
   `allow_unknown_cost: true`. The ledger records the **number of CLI calls and their
   wall-clock duration**, and the report lists them separately from priced spend.
-- **Reasoning tokens** are part of the estimate: visible output × a configurable
-  multiplier per level (`cost.reasoning_multipliers`, provisional). They are
-  calibrated from ledger observations once enough calls are recorded.
+- **Reasoning tokens** are part of the estimate: visible output × a multiplier per
+  level. Precedence: the ledger-observed ratio for (model, level) once enough calls
+  are recorded; then the registry entry's optional `reasoning_multipliers` (a partial
+  per-model override); then the global `cost.reasoning_multipliers` (provisional
+  defaults).
 
 ### 5.1 Models and reasoning (ADR 0006)
 
@@ -199,7 +201,12 @@ Paused runs can be resumed from another process (§7, storage).
   they also lack a verified price, so such runs are refused (§5).
 - Every call's **native parameters actually sent** are recorded in the run metadata.
 - `llm-crossjury models list` shows the registry. `llm-crossjury models refresh` diffs
-  it against the vendors' model-list endpoints (phase 1A).
+  it against the vendors' model-list endpoints and, by default, **only prints the
+  differences**. `--draft <file>` also writes draft entries for models the vendor
+  lists but the registry lacks: only `provider` and `model_id` (exactly as returned
+  by the official endpoint) are filled, every other field is `null`, and each entry is
+  marked as unverified. Drafts fail registry validation until a human completes them.
+  `refresh` never edits `models.yaml` (phase 1A).
 
 ## 6. Anonymity
 
@@ -209,7 +216,10 @@ Paused runs can be resumed from another process (§7, storage).
 - Member output (stage-1 answers and Document Review edit reasons) is then scrubbed
   **language-independently**. There are no sentence patterns: the model and vendor
   names Claude, ChatGPT, GPT, Gemini, Grok, Anthropic, OpenAI, Google and xAI (with
-  hyphenated version suffixes) are replaced with `[model]`, matched case-sensitively.
+  hyphenated version suffixes such as `GPT-x`) are replaced with `[model]`, matched
+  **case-insensitively on word boundaries** ("claude", "OPENAI" and "Gpt-4o" match;
+  "claudette" does not). Ordinary words equal to a name (e.g. the verb "grok") are
+  replaced too, which is an accepted trade-off.
   The count is recorded in the run record.
 - If the **original task input** (task text, or the document in Document Review)
   contains any of these names, the scrub is **disabled for that run**, because the task
@@ -298,14 +308,18 @@ Paused runs can be resumed from another process (§7, storage).
 20. **Daily limit and time zones.** *Decided:* the local calendar day.
 21. **`--auto` and checkpoint A.** *Decided:* `--auto` never skips peer review.
 
+22. **Reasoning multipliers.** *Decided:* global multipliers (`cost.reasoning_multipliers`,
+    provisional `low` 0.5 / `medium` 1.0 / `high` 2.0 / `default` 1.0), which a registry
+    entry may override per model and per level. Ledger calibration takes precedence
+    once available (§5).
+23. **Unregistered `api` models.** *Decided:* agreed. They are allowed with `default`
+    reasoning but have no verified price, so `api` runs that need them are refused. In
+    practice they are usable on the `cli` backend only. To use one on `api`, add a
+    registry entry.
+24. **`models refresh` output.** *Decided:* print the diff by default. `--draft <file>`
+    writes unverified draft entries (official `model_id` only, all other fields `null`)
+    (§5.1).
+
 ### Open
 
-22. **Reasoning multipliers.** The provisional defaults (`low` 0.5, `medium` 1.0,
-    `high` 2.0, `default` 1.0 × visible output) are placeholders until ledger
-    calibration. Should they be set per model in the registry instead of globally?
-23. **Unregistered `api` models.** They are allowed with `default` reasoning (ADR 0006),
-    but they have no verified price, so the cost rules refuse them. Is "usable only on
-    the `cli` backend" the intended outcome, or should a verified price be allowed in
-    the run config for unregistered models?
-24. **`models refresh` output.** Should refresh only print a diff (current design), or
-    also write a draft entry file for the user to review?
+_None._

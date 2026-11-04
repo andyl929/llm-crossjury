@@ -40,11 +40,11 @@ from `llm_crossjury`, except that `schemas.synthesis` imports `schemas.edits`.
 | `core/providers/cli/` | One adapter per vendor CLI (`claude`, `codex`, `gemini`, `grok`), plus `_subprocess.py` with the hardened runner (ADR 0002) |
 | `core/providers/mock.py` | Deterministic provider for tests |
 | `core/schemas/` | `Stage1Answer`, `AgreementJudgment`, `PeerReview`, `EditList`, `Synthesis`, `DocumentSynthesis`, and `export.py` (canonical strict JSON Schema). **Contract** |
-| `core/registry/` | `schema.py` (**contract**: `ModelEntry`, `ReasoningControl`, `CliFlags`, `Pricing`, aliases), `resolver.py` (`ModelRegistry`, `ModelResolver`, `ResolvedModel`, `refresh_from_vendors`) (ADR 0006) |
+| `core/registry/` | `schema.py` (**contract**: `ModelEntry` incl. optional per-model `reasoning_multipliers`, `ReasoningControl`, `CliFlags`, `Pricing`, aliases), `resolver.py` (`ModelRegistry`, `ModelResolver`, `ResolvedModel`, `refresh_from_vendors`, `write_draft_entries`) (ADR 0006) |
 | `core/cost/` | `PricingTable` (over the registry; verified entries only), `CostEstimator` → `CostEstimate` (with resolutions and reasoning tokens), `Ledger` (SQLite; per-run and daily limits; CLI call counts and durations; reasoning calibration), `compute_cost` |
 | `core/orchestrator/` | `Pipeline` (run/resume/skip-review), `Stage`, `CheckpointStage`, `PipelineHook` (`BudgetGuard`), `ReviewTopology` + `assign_reviews`, `agreement` (judge stage + ratio), `ranking` (Borda), `RunContext`, `CheckpointStore` |
 | `core/modes/` | Concrete stages and pipeline builders per mode. Document loading, chunking, merging and presets |
-| `core/anonymize.py` | Replaces model/vendor names with `[model]`; disabled per run if the input mentions them |
+| `core/anonymize.py` | Replaces model/vendor names with `[model]` (case-insensitive, word boundaries); disabled per run if the input mentions them |
 | `core/config_export.py` | JSON Schemas for `models.yaml` and the run config (`schemas/config/`) |
 | `cli/app.py` | `llm-crossjury run / resume / cost estimate / cost report / providers check / models list / models refresh` |
 | `prompts/` | Versioned prompt templates (`<stage>.v<N>.md`), always in English |
@@ -96,7 +96,8 @@ chair's output is a `DocumentSynthesis`.
   reasoning level → a native value from the registry (in normal mode, unsupported
   levels are downgraded to `default` with a warning; in strict mode they fail), the
   `native` passthrough merged last, and CLI argv tokens from `cli_flags`. Adapters
-  receive `CompletionRequest.native_params` and send it verbatim; they never map
+  receive `CompletionRequest.native_params` (with the level in
+  `CompletionRequest.reasoning`) and send it verbatim; they never map
   reasoning themselves. `CompletionResult.native_params_used` is recorded per call.
 - **Capabilities** are declared per model, and the orchestrator checks them before
   planning batches, caching, temperature or effort settings.

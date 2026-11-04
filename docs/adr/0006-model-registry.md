@@ -4,6 +4,8 @@
 - Date: 2026-11-04
 - Supersedes: ADR 0001 rule 5 ("each adapter maps reasoning effort internally").
   Amends: ADR 0003 §1 (the price source is now `config/models.yaml`).
+- Amended: 2026-11-04 (clarification: per-model multiplier override; `refresh --draft`;
+  `CompletionRequest.reasoning` naming; SPEC items 22-24)
 
 ## Context
 
@@ -29,6 +31,7 @@ so configs that name concrete ids go stale.
 | `cli_flags` | argv templates for the model and reasoning flags (`{model}`, `{value}`), one placeholder per token |
 | `context_window`, `max_output`, `structured_output` | Limits and capability (`null` = not verified) |
 | `pricing` | The former price fields: currency, input, output, cached input, cache write, reasoning, batch multiplier |
+| `reasoning_multipliers` | Optional per-level override of the global reasoning-token multipliers (`null` = global) |
 | `source_url`, `last_verified` | Provenance. Without both, the entry is *unverified* and its pricing is never used |
 
 The schema (`core/registry/schema.py`) is a **contract file**. JSON Schemas for
@@ -75,10 +78,11 @@ verbatim. They no longer map reasoning themselves.
 - Before a run, the estimate lists every (member, role) resolution: requested model,
   resolved id, backend, effective level, native value and warnings.
 - Reasoning tokens are estimated as `visible output × multiplier[level]`. The
-  multipliers are configurable (`cost.reasoning_multipliers`; the provisional defaults
-  are uncalibrated). Once the ledger has `calibration_min_samples` complete
+  multipliers are global (`cost.reasoning_multipliers`; the provisional defaults are
+  uncalibrated) and can be overridden per model and level by the entry's
+  `reasoning_multipliers`. Once the ledger has `calibration_min_samples` complete
   observations for a (provider, model, level), the observed
-  `reasoning_tokens / output_tokens` ratio replaces the multiplier.
+  `reasoning_tokens / output_tokens` ratio takes precedence over both.
 - `CompletionResult.native_params_used` records the parameters actually sent. The run
   record stores them for every call, and the ledger stores the effective level.
 
@@ -88,7 +92,12 @@ verbatim. They no longer map reasoning themselves.
   (offline).
 - `llm-crossjury models refresh` calls each vendor's model-list endpoint (`api`
   keys, no tokens spent) and prints the differences from the registry. It never
-  edits the file. It is implemented in phase 1A.
+  edits the file. With `--draft <file>`, it also writes draft entries for
+  vendor-listed models that are missing from the registry. Each draft has only
+  `provider` and `model_id`, taken verbatim from the official endpoint; every other
+  field is `null`, and the notes say "UNVERIFIED DRAFT". Drafts fail validation until a
+  human completes them from the vendor docs and moves them into `models.yaml`. The
+  command never overwrites an existing file. It is implemented in phase 1A.
 
 ## Consequences
 
