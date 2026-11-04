@@ -180,6 +180,23 @@
             }
           ]
         },
+        "reasoning_multipliers": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "propertyNames": {
+                "$ref": "#/$defs/ReasoningEffort"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reasoning Multipliers"
+        },
         "source_url": {
           "anyOf": [
             {
@@ -228,6 +245,7 @@
         "max_output",
         "structured_output",
         "pricing",
+        "reasoning_multipliers",
         "source_url",
         "last_verified",
         "notes"
@@ -447,6 +465,17 @@
         "none"
       ],
       "title": "ReasoningControlType",
+      "type": "string"
+    },
+    "ReasoningEffort": {
+      "description": "Provider-neutral reasoning/thinking effort.\n\nThe ModelResolver maps these onto vendor-native values using the model registry\n(``config/models.yaml``, ADR 0006). ``DEFAULT`` sends no setting at all.",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "default"
+      ],
+      "title": "ReasoningEffort",
       "type": "string"
     }
   },

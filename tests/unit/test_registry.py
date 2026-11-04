@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from llm_crossjury.core.config_export import CONFIG_MODELS, config_json_schema
-from llm_crossjury.core.providers.base import Backend
-from llm_crossjury.core.registry import ModelRegistryFile, ReasoningControlType
+from llm_crossjury.core.providers.base import Backend, ReasoningEffort
+from llm_crossjury.core.registry import ModelEntry, ModelRegistryFile, ReasoningControlType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLACEHOLDER = re.compile(r"^<[^<>]+>$")
@@ -59,3 +59,14 @@ def test_committed_config_schema_matches_model(model: type[BaseModel]) -> None:
     path = REPO_ROOT / "schemas" / "config" / f"{model.__name__}.schema.json"
     assert path.exists(), "run: uv run python -m llm_crossjury.core.schemas schemas"
     assert json.loads(path.read_text(encoding="utf-8")) == config_json_schema(model)
+
+
+def test_per_model_multiplier_override_is_partial(registry: ModelRegistryFile) -> None:
+    raw = registry.models[0].model_dump(mode="json")
+    raw["reasoning_multipliers"] = {"high": 3.0}
+    entry = ModelEntry.model_validate(raw)
+    assert entry.reasoning_multipliers == {ReasoningEffort.HIGH: 3.0}
+
+    raw["reasoning_multipliers"] = {"extreme": 9.0}
+    with pytest.raises(ValidationError):
+        ModelEntry.model_validate(raw)

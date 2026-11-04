@@ -158,6 +158,14 @@ def models_refresh(
     provider: Annotated[
         str | None, typer.Option("--provider", "-p", help="Only this provider.")
     ] = None,
+    draft: Annotated[
+        Path | None,
+        typer.Option(
+            "--draft",
+            help="Also write unverified draft entries (model_id only) for new models "
+            "to this file. Never overwrites an existing file.",
+        ),
+    ] = None,
 ) -> None:
     """Compare the registry with each vendor's model-list endpoint and print the
     differences. Never edits config/models.yaml and spends no tokens."""

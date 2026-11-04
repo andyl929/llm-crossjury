@@ -26,3 +26,9 @@ runner = CliRunner()
 def test_help(args: list[str]) -> None:
     result = runner.invoke(app, args)
     assert result.exit_code == 0, result.output
+
+
+def test_models_refresh_has_draft_option() -> None:
+    result = runner.invoke(app, ["models", "refresh", "--help"])
+    assert result.exit_code == 0
+    assert "--draft" in result.output

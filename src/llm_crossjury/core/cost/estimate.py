@@ -4,10 +4,11 @@ The estimate is a range, not a point: output length is unknown before the run, a
 cache hit rates are uncertain. ``cli``-backend calls are priced as ``None`` (the
 vendor bills the user's subscription, not per token) and listed separately.
 
-Reasoning tokens are estimated as ``visible output x multiplier[level]`` using the
-configurable ``CostConfig.reasoning_multipliers``. Once the ledger holds enough
-observations for a (provider, model, level), the observed ratio replaces the
-configured multiplier (``Ledger.observed_reasoning_ratio``).
+Reasoning tokens are estimated as ``visible output x multiplier[level]``. The
+multiplier comes from, in order of precedence: the ledger-observed ratio for
+(provider, model, level) once enough observations exist
+(``Ledger.observed_reasoning_ratio``); the registry entry's
+``reasoning_multipliers``; the global ``CostConfig.reasoning_multipliers``.
 
 The estimate also lists every member's resolved model, backend and native reasoning
 parameters, so the user sees exactly what will be called before confirming.

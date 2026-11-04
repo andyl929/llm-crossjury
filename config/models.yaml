@@ -31,6 +31,7 @@ models:
     max_output: null
     structured_output: null
     pricing: null
+    reasoning_multipliers: null   # per-level override of cost.reasoning_multipliers
     source_url: null
     last_verified: null
     notes: "EXAMPLE ONLY: not a real model."
@@ -55,6 +56,7 @@ models:
       cache_write_per_mtok: null
       reasoning_per_mtok: null
       batch_multiplier: null
+    reasoning_multipliers: null   # per-level override of cost.reasoning_multipliers
     source_url: null
     last_verified: null
     notes: "EXAMPLE ONLY: not a real model."
@@ -68,6 +70,7 @@ models:
     max_output: null
     structured_output: null
     pricing: null
+    reasoning_multipliers: null   # per-level override of cost.reasoning_multipliers
     source_url: null
     last_verified: null
     notes: "EXAMPLE ONLY: not a real model."
@@ -81,6 +84,7 @@ models:
     max_output: null
     structured_output: null
     pricing: null
+    reasoning_multipliers: null   # per-level override of cost.reasoning_multipliers
     source_url: null
     last_verified: null
     notes: "EXAMPLE ONLY: not a real model."

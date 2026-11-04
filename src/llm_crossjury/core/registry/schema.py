@@ -23,7 +23,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, HttpUrl
 
-from llm_crossjury.core.providers.base import Backend
+from llm_crossjury.core.providers.base import Backend, ReasoningEffort
 
 NativeValue = str | int
 """A vendor-native reasoning value: a level name (``"high"``) or a budget (``8192``)."""
@@ -114,6 +114,11 @@ class ModelEntry(_Config):
     """``None`` = not verified; treated as unsupported."""
     pricing: Pricing | None
     """``None`` = unpriced; ``api`` runs needing this model are refused."""
+    reasoning_multipliers: dict[ReasoningEffort, float] | None
+    """Per-model override of ``cost.reasoning_multipliers`` (reasoning tokens = visible
+    output x multiplier). Levels not listed fall back to the global value; ``None`` =
+    use the global values. Ledger calibration still takes precedence once enough
+    observations exist."""
     source_url: HttpUrl | None
     last_verified: date | None
     notes: str | None
