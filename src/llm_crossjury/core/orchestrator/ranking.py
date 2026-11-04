@@ -5,6 +5,9 @@ Each ``PeerReview.ranking`` covers ``m`` targets. Position ``p`` (0 = best) earn
 regardless of how many targets it ranked. Reviews with ``m == 1`` carry no ranking
 information and contribute nothing (they still contribute issues). A label's score is
 its mean points over the reviews that ranked it.
+
+Not called at all in the "issues only" mode (``ring`` with ``k = 1``); the report then
+shows issue counts by severity without a ranking.
 """
 
 from __future__ import annotations

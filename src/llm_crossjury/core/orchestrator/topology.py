@@ -8,7 +8,9 @@ With ``n`` kept answers:
 * ``SINGLE_JUDGE``: one designated judge reviews all answers in one call. ``1`` call.
 
 Default when not configured (``llm_crossjury.core.config.resolve_topology``):
-``FULL`` for <= 3 reviewed answers, ``RING`` with ``k = 1`` for >= 4.
+``FULL`` for <= 3 reviewed answers, ``RING`` with ``k = 2`` for >= 4.
+``RING`` with ``k = 1`` is the "issues only, no ranking" mode: each reviewer sees a
+single target, so rankings carry no information and Borda aggregation is skipped.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ def assign_reviews(
     labels: dict[str, str],
     topology: ReviewTopology,
     *,
-    ring_k: int = 1,
+    ring_k: int = 2,
     judge: str | None = None,
     seed: int | None = None,
 ) -> list[ReviewAssignment]:
