@@ -1,0 +1,114 @@
+{
+  "additionalProperties": false,
+  "description": "All edits one member (or the chair) proposes for a document.",
+  "properties": {
+    "summary": {
+      "description": "Overall assessment of the document, a few sentences.",
+      "type": "string"
+    },
+    "edits": {
+      "items": {
+        "additionalProperties": false,
+        "description": "A single proposed change.",
+        "properties": {
+          "id": {
+            "description": "Unique within one EditList, e.g. \"e3\".",
+            "type": "string"
+          },
+          "location": {
+            "additionalProperties": false,
+            "description": "Where an edit applies.\n\noriginal in Edit is the authoritative anchor; these fields help a\nhuman find it and help the applier disambiguate repeated text.",
+            "properties": {
+              "section": {
+                "description": "Heading path, e.g. \"3 Method > 3.2 Data\".",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "line_start": {
+                "description": "1-based line in the submitted source, if known.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "line_end": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "occurrence": {
+                "description": "1-based occurrence index of original if it appears more than once.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "section",
+              "line_start",
+              "line_end",
+              "occurrence"
+            ],
+            "type": "object"
+          },
+          "original": {
+            "description": "Exact source text to be replaced (verbatim, including markup).",
+            "type": "string"
+          },
+          "replacement": {
+            "description": "New text. Empty string means deletion.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the change improves the document.",
+            "type": "string"
+          },
+          "category": {
+            "description": "Why an edit is proposed. Presets may restrict which categories are requested.",
+            "enum": [
+              "correctness",
+              "clarity",
+              "structure",
+              "consistency",
+              "citation",
+              "style",
+              "grammar",
+              "formatting"
+            ],
+            "type": "string"
+          },
+          "severity": {
+            "description": "How much an issue matters, from most to least severe.",
+            "enum": [
+              "critical",
+              "major",
+              "minor",
+              "nit"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "location",
+          "original",
+          "replacement",
+          "reason",
+          "category",
+          "severity"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "summary",
+    "edits"
+  ],
+  "type": "object"
+}

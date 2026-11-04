@@ -1,0 +1,108 @@
+{
+  "additionalProperties": false,
+  "description": "Everything one reviewer says about the responses assigned to it.",
+  "properties": {
+    "reviews": {
+      "description": "One entry per assigned target, in any order.",
+      "items": {
+        "additionalProperties": false,
+        "description": "A review of one anonymized response.",
+        "properties": {
+          "target": {
+            "description": "Anonymous label of the reviewed response, e.g. \"Response B\".",
+            "type": "string"
+          },
+          "issues": {
+            "description": "Problems, each anchored in a verbatim quote. May be empty.",
+            "items": {
+              "additionalProperties": false,
+              "description": "One problem found in a reviewed response.",
+              "properties": {
+                "quote": {
+                  "description": "Verbatim excerpt from the reviewed response that the issue is about.",
+                  "type": "string"
+                },
+                "claim_id": {
+                  "description": "Id of the affected claim in the reviewed response, if any.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "problem": {
+                  "description": "What is wrong, stated concretely.",
+                  "type": "string"
+                },
+                "severity": {
+                  "description": "How much an issue matters, from most to least severe.",
+                  "enum": [
+                    "critical",
+                    "major",
+                    "minor",
+                    "nit"
+                  ],
+                  "type": "string"
+                },
+                "suggested_fix": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "quote",
+                "claim_id",
+                "problem",
+                "severity",
+                "suggested_fix"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "strengths": {
+            "description": "What the response does well.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "score_rationale": {
+            "description": "Why the score follows from the issues and strengths above.",
+            "type": "string"
+          },
+          "score": {
+            "description": "Overall quality on a 1-10 scale (range validated after parsing).",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target",
+          "issues",
+          "strengths",
+          "score_rationale",
+          "score"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "ranking": {
+      "description": "Assigned target labels, best first. Must be a permutation of reviewed targets.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "ranking_rationale": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "reviews",
+    "ranking",
+    "ranking_rationale"
+  ],
+  "type": "object"
+}

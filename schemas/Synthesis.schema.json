@@ -1,0 +1,123 @@
+{
+  "additionalProperties": false,
+  "description": "Chair output for Council mode (and the narrative part of Document Review).",
+  "properties": {
+    "consensus": {
+      "items": {
+        "additionalProperties": false,
+        "description": "A point most or all members agree on.",
+        "properties": {
+          "statement": {
+            "type": "string"
+          },
+          "supporting": {
+            "description": "Anonymous labels of the members that support it.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "statement",
+          "supporting"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "disputed": {
+      "items": {
+        "additionalProperties": false,
+        "description": "A question on which members materially disagree.",
+        "properties": {
+          "id": {
+            "description": "Unique within one Synthesis, e.g. \"d1\".",
+            "type": "string"
+          },
+          "question": {
+            "description": "The disagreement phrased as a neutral question.",
+            "type": "string"
+          },
+          "positions": {
+            "description": "At least two, one per distinct stance (labels may repeat across stances only\nif a member was internally inconsistent).",
+            "items": {
+              "additionalProperties": false,
+              "description": "One side of a dispute.",
+              "properties": {
+                "label": {
+                  "description": "Anonymous label of the member holding this position.",
+                  "type": "string"
+                },
+                "stance": {
+                  "description": "The position in one or two sentences.",
+                  "type": "string"
+                },
+                "argument": {
+                  "description": "The strongest reasoning offered for it, from the member's answer or reviews.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "stance",
+                "argument"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "chair_assessment": {
+            "description": "The chair's own view, kept separate so the user can ignore it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "question",
+          "positions",
+          "chair_assessment"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "unique": {
+      "items": {
+        "additionalProperties": false,
+        "description": "Something only one member raised that the chair judges worth keeping.",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "insight": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "insight"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "final_text": {
+      "description": "None in the draft; the final answer in Markdown after adjudication.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "consensus",
+    "disputed",
+    "unique",
+    "final_text"
+  ],
+  "type": "object"
+}

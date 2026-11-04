@@ -1,0 +1,72 @@
+{
+  "additionalProperties": false,
+  "description": "One member's independent answer to the task.",
+  "properties": {
+    "answer": {
+      "description": "The full answer in Markdown.",
+      "type": "string"
+    },
+    "claims": {
+      "description": "Key claims made in answer. Empty only for trivial tasks.",
+      "items": {
+        "additionalProperties": false,
+        "description": "An atomic, checkable statement extracted by the member from its own answer.\n\nClaims are what peer reviewers and the chair compare across members; they make\nagreement and disagreement detectable without diffing prose.",
+        "properties": {
+          "id": {
+            "description": "Member-local id, e.g. \"c1\". Unique within one Stage1Answer.",
+            "type": "string"
+          },
+          "text": {
+            "description": "The claim as a single self-contained sentence.",
+            "type": "string"
+          },
+          "confidence": {
+            "description": "Self-reported confidence of a claim.",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "support": {
+            "description": "Brief justification or source the member relies on; None if none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "confidence",
+          "support"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "assumptions": {
+      "description": "Assumptions the member made about an under-specified task.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "caveats": {
+      "description": "Known limitations of the answer.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "answer",
+    "claims",
+    "assumptions",
+    "caveats"
+  ],
+  "type": "object"
+}
