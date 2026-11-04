@@ -13,8 +13,8 @@ Read this file, `docs/SPEC.md` and `docs/ARCHITECTURE.md` before you change anyt
    length. Report presence as "set"/"not set" only.
 4. **No hard-coded prices.** Prices come only from `config/pricing.yaml`, and every
    entry needs `source_url` and `last_verified`. Never fill a price from memory.
-5. **Contract files are frozen**: `src/council/core/schemas/**` and
-   `src/council/core/providers/base.py`. Do not modify them. If a contract is wrong
+5. **Contract files are frozen**: `src/llm_crossjury/core/schemas/**` and
+   `src/llm_crossjury/core/providers/base.py`. Do not modify them. If a contract is wrong
    or insufficient, add an entry to `docs/contract-issues.md`, work around it outside
    the contract if you can, and report it under *Decisions needed*.
 6. **No global installs** (pip/npm/brew/winget/choco/system packages, global uv
@@ -31,7 +31,7 @@ uv sync                              # create/update .venv from uv.lock
 uv run pytest                        # all tests (network blocked)
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                          # strict
-uv run python -m council.core.schemas schemas   # regenerate JSON schemas
+uv run python -m llm_crossjury.core.schemas schemas   # regenerate JSON schemas
 ```
 
 All four checks (pytest, ruff check, ruff format --check, mypy) must pass before
@@ -51,7 +51,7 @@ every commit.
 - Subprocesses: an argument list, an absolute path from `shutil.which`, no
   `shell=True`, prompts on stdin (ADR 0002).
 - Docstrings: Google style on every public symbol.
-- Keep `core` free of CLI/UI concerns. `core` never imports `council.cli`.
+- Keep `core` free of CLI/UI concerns. `core` never imports `llm_crossjury.cli`.
 - Run data goes to the platformdirs user data dir, never into the repository.
 
 ## 4. Commits

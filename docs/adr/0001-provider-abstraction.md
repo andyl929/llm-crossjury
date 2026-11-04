@@ -5,7 +5,7 @@
 
 ## Context
 
-council calls four vendors through two very different backends: official SDKs, and
+llm-crossjury calls four vendors through two very different backends: official SDKs, and
 the official CLIs the user is signed in to. Stages must not care which one they are
 talking to. Cost control depends on prompt caching, which only works when calls
 share a byte-identical prefix. Usage reporting differs between vendors, and CLIs

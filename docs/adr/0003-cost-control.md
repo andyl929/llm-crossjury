@@ -5,7 +5,7 @@
 
 ## Context
 
-A council run multiplies spend. With N members it makes N answer calls, up to
+A Council-mode run multiplies spend. With N members it makes N answer calls, up to
 N·(N−1) review calls, and two chair calls, and the review and chair calls carry long
 contexts. Cost has to be visible before the run, enforced during it, and kept down
 by design. Prices change often, and anything hard-coded or remembered goes stale.

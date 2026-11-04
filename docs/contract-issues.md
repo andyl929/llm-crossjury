@@ -1,6 +1,6 @@
 # Contract issues
 
-Contract files are `src/council/core/schemas/**` and `src/council/core/providers/base.py`.
+Contract files are `src/llm_crossjury/core/schemas/**` and `src/llm_crossjury/core/providers/base.py`.
 They must not be modified without the maintainer's approval. If you find a problem
 with a contract, add an entry below and keep working against the current contract.
 Where needed, use an adapter-side workaround and note it in the entry.

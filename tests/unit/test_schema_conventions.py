@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from council.core.schemas import EXPORTED_MODELS, strict_json_schema
+from llm_crossjury.core.schemas import EXPORTED_MODELS, strict_json_schema
 
 FORBIDDEN_KEYWORDS = {"anyOf", "oneOf", "allOf", "not", "$ref", "$defs", "default", "if"}
 CONSTRAINT_KEYWORDS = {
@@ -69,6 +69,6 @@ def test_schema_is_strict_subset(model: type[BaseModel]) -> None:
 @pytest.mark.parametrize("model", EXPORTED_MODELS, ids=lambda m: m.__name__)
 def test_committed_schema_matches_model(model: type[BaseModel]) -> None:
     path = REPO_ROOT / "schemas" / f"{model.__name__}.schema.json"
-    assert path.exists(), "run: uv run python -m council.core.schemas schemas"
+    assert path.exists(), "run: uv run python -m llm_crossjury.core.schemas schemas"
     committed = json.loads(path.read_text(encoding="utf-8"))
     assert committed == strict_json_schema(model), "schemas/ is stale; regenerate it"

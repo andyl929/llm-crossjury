@@ -7,10 +7,10 @@ import socket
 import pytest
 from pytest_socket import SocketConnectBlockedError
 
-from council.core.providers.api import AnthropicApiProvider
-from council.core.providers.base import Provider, Usage
-from council.core.providers.cli import ClaudeCliProvider, GrokCliProvider
-from council.core.providers.mock import MockProvider
+from llm_crossjury.core.providers.api import AnthropicApiProvider
+from llm_crossjury.core.providers.base import Provider, Usage
+from llm_crossjury.core.providers.cli import ClaudeCliProvider, GrokCliProvider
+from llm_crossjury.core.providers.mock import MockProvider
 
 
 def test_mock_provider_satisfies_protocol() -> None:

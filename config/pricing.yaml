@@ -4,11 +4,11 @@
 # - Every number in this file must be copied from the vendor's official pricing page
 #   given in `source_url`, on the date given in `last_verified`.
 # - Never fill a price from memory, a blog post, or another tool. If unsure, leave the
-#   model out: council refuses to run unpriced models unless the budget explicitly
+#   model out: llm-crossjury refuses to run unpriced models unless the budget explicitly
 #   sets allow_unknown_cost: true.
 # - Units: currency per 1,000,000 tokens.
 # - A null rate means "not billed separately"; see PriceEntry in
-#   src/council/core/cost/pricing.py for how each null is treated.
+#   src/llm_crossjury/core/cost/pricing.py for how each null is treated.
 #
 # This file intentionally ships with NO entries. Add the models you use.
 

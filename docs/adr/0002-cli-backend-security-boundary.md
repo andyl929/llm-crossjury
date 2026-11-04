@@ -6,17 +6,17 @@
 ## Context
 
 Many users pay for vendor subscriptions that come with an official CLI (`claude`,
-`codex`, `gemini`, and possibly `grok`). Using those CLIs as council members saves
+`codex`, `gemini`, and possibly `grok`). Using those CLIs as members saves
 API spend. These CLIs are agentic tools, though. They can read files, run commands
-and edit code, and they keep OAuth tokens or cookies in the user's profile. council
+and edit code, and they keep OAuth tokens or cookies in the user's profile. llm-crossjury
 must get model output from them **without** becoming a credential-handling tool and
 **without** giving a model agentic access to the user's machine.
 
 ## Decision
 
-### What council does
+### What llm-crossjury does
 
-1. **Subprocess only.** council launches the vendor's own executable and reads its
+1. **Subprocess only.** llm-crossjury launches the vendor's own executable and reads its
    stdout. It never talks to the vendor's backend directly with the CLI's identity.
 2. **Resolve the executable with `shutil.which`** and call `subprocess` with the
    absolute path and an **argument list**. `shell=True` is never used.
@@ -24,8 +24,8 @@ must get model output from them **without** becoming a credential-handling tool 
      resolves them through `PATHEXT`, so the call goes to a concrete file. Windows
      runs batch files through `cmd.exe`, which re-parses arguments, and argument
      escaping for batch files is a known injection risk. So the argv contains **only
-     fixed, council-controlled flags**. The prompt and every other user- or
-     model-derived string go over **stdin** (or a temp file council writes, if the
+     fixed, llm-crossjury-controlled flags**. The prompt and every other user- or
+     model-derived string go over **stdin** (or a temp file llm-crossjury writes, if the
      CLI cannot read stdin). If a CLI can only take the prompt in argv, it is skipped
      on Windows.
 3. **Prompt on stdin, never in argv.** This also keeps prompts out of process
@@ -46,7 +46,7 @@ must get model output from them **without** becoming a credential-handling tool 
 9. **Usage reported honestly.** Fields the CLI does not report are `None`. Cost is
    unknown unless the user opts in (SPEC §5).
 
-### What council never does
+### What llm-crossjury never does
 
 - It never reads, parses, copies, caches, logs or stores OAuth tokens, refresh tokens,
   cookies, keychain entries, or any file in a CLI's config or credential directory.
@@ -67,7 +67,7 @@ recorded in its adapter's `skipped_reason` and in this ADR's table:
 | S2 | It cannot run non-interactively with output on stdout |
 | S3 | Tool use, file writes or command execution cannot be reliably disabled |
 | S4 | The prompt cannot be passed without argv (stdin or file), for the Windows rule above |
-| S5 | It requires council to read or handle credentials in order to work |
+| S5 | It requires llm-crossjury to read or handle credentials in order to work |
 | S6 | The vendor's terms prohibit this kind of automated use |
 | S7 | Its output cannot be told apart from interactive or decorative output reliably enough to parse |
 
@@ -89,7 +89,7 @@ moved to "Skipped" with a reason if any condition fails.
 - The `cli` backend gives weaker guarantees on cost and usage. It is labelled
   experimental in the CLI and the docs.
 - Some CLIs may end up skipped on Windows only (S4).
-- council's attack surface stays limited to launching a known executable with fixed flags.
+- llm-crossjury's attack surface stays limited to launching a known executable with fixed flags.
 
 ## Alternatives considered
 

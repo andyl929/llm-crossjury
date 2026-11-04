@@ -14,7 +14,7 @@ rewritten document or a list of discrete proposed edits.
 Document Review returns an **`EditList`**. Each `Edit` has `location` (section, lines,
 occurrence), verbatim `original`, `replacement`, `reason`, `category` and `severity`.
 The chair merges the members' lists into a `DocumentSynthesis`, and conflicting edits
-become **disputes** for checkpoint B. council can render accepted edits as a unified
+become **disputes** for checkpoint B. llm-crossjury can render accepted edits as a unified
 diff, but it never overwrites the input file.
 
 ## Rationale

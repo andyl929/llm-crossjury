@@ -1,8 +1,8 @@
-# council (working name)
+# llm-crossjury
 
 > Status: **design / skeleton phase.** Nothing runs against real models yet.
 
-`council` sends one task to several LLMs (Claude, OpenAI, Gemini, Grok). Each one
+`llm-crossjury` sends one task to several LLMs (Claude, OpenAI, Gemini, Grok). Each one
 answers on its own. Then they review each other's answers without knowing who
 wrote which. A *chair* model combines the results, and any point where the models
 still **disagree** comes back to you to decide.
@@ -23,7 +23,7 @@ Academic paper revision is one preset of that mode.
 
 - **api**: the official SDKs with your own API keys, read from `.env`.
 - **cli** (*experimental*): runs the official CLIs you are already signed in to
-  (`claude`, `codex`, `gemini`, `grok`) as subprocesses. council never reads
+  (`claude`, `codex`, `gemini`, `grok`) as subprocesses. llm-crossjury never reads
   their credentials. See [ADR 0002](docs/adr/0002-cli-backend-security-boundary.md).
 
 ## Cost is a first-class concern
@@ -40,7 +40,7 @@ uv sync
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
-uv run council --help
+uv run llm-crossjury --help
 ```
 
 Read [AGENTS.md](AGENTS.md) before contributing. Design documents live in [docs/](docs/).

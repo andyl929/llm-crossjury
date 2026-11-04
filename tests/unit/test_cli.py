@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
-from council.cli.app import app
+from llm_crossjury.cli.app import app
 
 runner = CliRunner()
 

@@ -6,19 +6,19 @@ Status: draft · Covers the skeleton as committed. Things marked *(planned)* are
 
 ```
         ┌───────────────┐      ┌────────────────────────────┐
-        │  council CLI  │      │  Web UI + FastAPI (later)  │
+        │  llm-crossjury CLI  │      │  Web UI + FastAPI (later)  │
         │  (Typer)      │      │  frontend/ placeholder     │
         └───────┬───────┘      └──────────────┬─────────────┘
                 │      same core API          │
 ┌───────────────▼─────────────────────────────▼───────────────┐
-│ council.core                                                │
-│  modes/         pipeline builders: compare, council, doc    │
+│ llm_crossjury.core                                                │
+│  modes/         pipeline builders: compare, llm-crossjury, doc    │
 │  orchestrator/  Pipeline, Stage, CheckpointStage, hooks,    │
 │                 topology, RunContext, checkpoint store      │
 │  schemas/       Pydantic structured-output models (CONTRACT)│
 │  cost/          PricingTable, CostEstimator, Ledger         │
 │  providers/     base.py (CONTRACT), api/, cli/, mock        │
-│  config.py      CouncilConfig        storage.py  DataPaths  │
+│  config.py      CrossjuryConfig        storage.py  DataPaths  │
 └───────────────┬─────────────────────────────┬───────────────┘
                 │                             │
        vendor SDKs (api)            vendor CLIs as subprocesses (cli)
@@ -40,10 +40,10 @@ else from `council`, except that `schemas.synthesis` imports `schemas.edits`.
 | `core/cost/` | `PricingTable` (from YAML), `CostEstimator` → `CostEstimate`, `Ledger` (SQLite), `compute_cost` |
 | `core/orchestrator/` | `Pipeline` (run/resume), `Stage` protocol, `CheckpointStage`, `PipelineHook` (`BudgetGuard`, `AgreementEarlyStop`), `ReviewTopology` + `assign_reviews`, `RunContext`, `CheckpointStore` |
 | `core/modes/` | Concrete stages and pipeline builders for each mode, plus document loading and presets |
-| `cli/app.py` | `council run / resume / cost estimate / cost report / providers check` |
+| `cli/app.py` | `llm-crossjury run / resume / cost estimate / cost report / providers check` |
 | `prompts/` | Versioned prompt templates (`<stage>.v<N>.md`) |
 | `schemas/` | Generated `*.schema.json`. A test fails when they drift from the models |
-| `config/` | `pricing.yaml` (empty, user-maintained) and `council.example.yaml` |
+| `config/` | `pricing.yaml` (empty, user-maintained) and `llm-crossjury.example.yaml` |
 | `scripts/` | Manual, possibly billed scripts. Never collected by pytest |
 
 ## 3. Data flow (Council mode)
@@ -99,7 +99,7 @@ stage 1 output is `EditList`, and the chair output is `DocumentSynthesis`.
 2. Interactive CLI: the CLI renders the request, collects a `UserDecision`, and calls
    `resume` in the same process.
 3. Non-interactive or deferred: `RunContext.to_snapshot()` and the request are saved
-   by `FileCheckpointStore`. The process exits with code 3. `council resume <run_id>`
+   by `FileCheckpointStore`. The process exits with code 3. `llm-crossjury resume <run_id>`
    loads the snapshot, validates the decision against the request, and calls `resume`.
 4. The decision itself is stored in `ctx.artifacts[<checkpoint stage name>]`, so
    reports show what the user decided.
@@ -107,15 +107,15 @@ stage 1 output is `EditList`, and the chair output is `DocumentSynthesis`.
 ## 6. Storage and privacy
 
 Run data **never lives in the repository**. All of it goes to the platform user-data
-directory from `platformdirs.user_data_dir("council-placeholder", appauthor=False)`:
+directory from `platformdirs.user_data_dir("llm-crossjury", appauthor=False)`:
 
 | OS | Typical location |
 |---|---|
-| Windows | `%LOCALAPPDATA%\council-placeholder\` |
-| macOS | `~/Library/Application Support/council-placeholder/` |
-| Linux | `$XDG_DATA_HOME/council-placeholder/` (default `~/.local/share/...`) |
+| Windows | `%LOCALAPPDATA%\llm-crossjury\` |
+| macOS | `~/Library/Application Support/llm-crossjury/` |
+| Linux | `$XDG_DATA_HOME/llm-crossjury/` (default `~/.local/share/...`) |
 
-Precedence: `CouncilConfig.data_dir` > `COUNCIL_DATA_DIR` > platformdirs. The
+Precedence: `CrossjuryConfig.data_dir` > `LLM_CROSSJURY_DATA_DIR` > platformdirs. The
 resolver refuses a directory inside a git working tree.
 
 ```
@@ -140,7 +140,7 @@ No mode ever stores API keys, OAuth tokens, cookies, or CLI credential paths.
 
 ## 7. Configuration and secrets
 
-- `council.yaml` (from `config/council.example.yaml`) defines members, chair, review,
+- `llm-crossjury.yaml` (from `config/llm-crossjury.example.yaml`) defines members, chair, review,
   budget, cost options, `pricing_path`, `store_content` and `data_dir`. It contains no
   secrets.
 - API keys come only from environment variables, which may be loaded from `.env`.

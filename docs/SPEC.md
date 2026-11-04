@@ -1,12 +1,12 @@
-# council — Product Specification (v1)
+# llm-crossjury — Product Specification (v1)
 
 Status: draft for review · Phase: design/skeleton
 
 ## 1. Purpose
 
-council runs one task across several LLMs (Claude, OpenAI, Gemini, Grok). Each model
+llm-crossjury runs one task across several LLMs (Claude, OpenAI, Gemini, Grok). Each model
 answers independently. The answers are then reviewed anonymously by the other
-models, and a designated **chair** model synthesizes them. council does not hide
+models, and a designated **chair** model synthesizes them. llm-crossjury does not hide
 disagreement behind a smooth summary. It shows the points where members disagree
 and lets the **user** settle them.
 
@@ -48,10 +48,10 @@ that mode.
    budget that stops the run, so I never get surprised by a bill.
 9. **US-9 Cost after.** I want a per-run, per-stage, per-provider cost report.
 10. **US-10 Use my subscriptions.** I want to optionally use the official CLIs I am
-    already signed in to, without council ever touching my credentials.
+    already signed in to, without llm-crossjury ever touching my credentials.
 11. **US-11 Pause and come back.** I want to stop at a checkpoint, close the terminal,
     and resume later with my decision.
-12. **US-12 Privacy.** I want to choose whether council stores prompt and response
+12. **US-12 Privacy.** I want to choose whether llm-crossjury stores prompt and response
     text on disk at all.
 
 ## 3. Modes
@@ -103,7 +103,7 @@ v1 input formats: **Markdown (`.md`)** and **LaTeX (`.tex`)**, single file, UTF-
 | 3. Draft synthesis | Document + edit lists + reviews | `DocumentSynthesis`: merged, de-duplicated `edits[]` (consensus edits). Conflicting edits go in `synthesis.disputed[]`, unique edits are noted in `synthesis.unique[]` |
 | **Checkpoint B — Adjudicate** | Disputed edits | `AdjudicationDecision` |
 | 4. Final | Draft + rulings | Final `DocumentSynthesis` (edits + summary) |
-| Report | Final edits | Edit table, plus an optional unified diff for the user to apply. **council never overwrites the input file** |
+| Report | Final edits | Edit table, plus an optional unified diff for the user to apply. **llm-crossjury never overwrites the input file** |
 
 Presets (`paper` in v1) set the instructions, the allowed `EditCategory` values, and the prompt version.
 
@@ -116,7 +116,7 @@ Presets (`paper` in v1) set the instructions, the allowed `EditCategory` values,
 | User returns | Labels to drop (empty keeps all) | One ruling per dispute |
 | Validation | At least one answer must remain, and two for peer review. If only one remains, review is skipped | Every dispute id needs a ruling. `adopt_position` needs a label that exists in that dispute |
 | Interactive CLI | Prompted inline | Prompted inline |
-| `--non-interactive` | Run state is saved and the process exits with code 3, printing the run id. `council resume <id> --decision file.json` continues | Same |
+| `--non-interactive` | Run state is saved and the process exits with code 3, printing the run id. `llm-crossjury resume <id> --decision file.json` continues | Same |
 | `--auto` (TBD, see Open Questions) | Keep all | Defer to chair |
 
 Run state is the same whether the run pauses in-process or is resumed later. The
@@ -170,7 +170,7 @@ future Web UI will use the same mechanism.
 
 ## 9. Open Questions
 
-1. **Final project name.** The distribution name is `council-placeholder` for now and
+1. **Final project name.** The distribution name is `llm-crossjury` for now and
    the import name is `council`. What should the final PyPI/GitHub name be? `council`
    is likely taken on PyPI.
 2. **Chair as member.** May the chair also be a member? If so, does it see its own
@@ -182,7 +182,7 @@ future Web UI will use the same mechanism.
    Should early stop be on by default?
 5. **`--auto` mode.** Should there be a fully unattended mode (keep all, defer to
    chair)? Should it be allowed at all, given that adjudication is a core value?
-6. **Anonymity scrubbing.** Should council actively remove self-identifying phrases
+6. **Anonymity scrubbing.** Should llm-crossjury actively remove self-identifying phrases
    ("As Claude…") from answers before review, or only instruct against them?
 7. **Default budget.** What should the shipped default `budget.limit` and
    `confirm_above` be? Should a run with no budget configured be refused?
@@ -193,7 +193,7 @@ future Web UI will use the same mechanism.
 10. **`store_content` default.** The proposed default is `false`. That makes paused
     runs resumable only within the same process. Is that acceptable, or should
     checkpoints always store content (encrypted? plain?) while run records do not?
-11. **Reasoning effort / thinking settings.** Should council expose per-member
+11. **Reasoning effort / thinking settings.** Should llm-crossjury expose per-member
     reasoning-effort settings in v1? They strongly affect cost.
 12. **Review scoring scale.** Is a 1–10 score with a written rationale right, or is a
     ranking alone enough?
