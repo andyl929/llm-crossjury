@@ -61,4 +61,5 @@ jobs:
         shell: bash
         run: |
           uv run python -m llm_crossjury.core.schemas schemas
-          git diff --exit-code -- schemas/
+          # Fails on modified AND on new (untracked) schema files.
+          test -z "$(git status --porcelain -- schemas/)" || { git status --porcelain -- schemas/; git diff -- schemas/; exit 1; }
