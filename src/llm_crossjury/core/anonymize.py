@@ -11,7 +11,11 @@ Two layers (SPEC §6):
 The scrub is **disabled for the whole run** when the original task input (task text,
 or the document in Document Review) mentions any of the names, because the task is
 then legitimately about them. :func:`scrub_enabled_for` makes that decision once per
-run. Matching is case-sensitive so that ordinary words (e.g. "grok") are untouched.
+run, using the same pattern.
+
+Matching is case-insensitive and on word boundaries: "claude", "OPENAI" and "Gpt-4o"
+match; "claudette" or "googleplex" do not. The trade-off is that ordinary words equal
+to a name (e.g. the verb "grok") are replaced too.
 """
 
 from __future__ import annotations
@@ -34,9 +38,10 @@ MODEL_AND_VENDOR_NAMES: tuple[str, ...] = (
 )
 
 NAME_PATTERN: re.Pattern[str] = re.compile(
-    r"\b(?:" + "|".join(MODEL_AND_VENDOR_NAMES) + r")(?:-[\w.]+)*\b"
+    r"\b(?:" + "|".join(MODEL_AND_VENDOR_NAMES) + r")(?:-[\w.]+)*\b",
+    re.IGNORECASE,
 )
-"""Whole names plus optional hyphenated suffixes; case-sensitive."""
+"""Whole words, case-insensitive, plus optional hyphenated suffixes (``GPT-x``)."""
 
 
 @dataclass(frozen=True)
