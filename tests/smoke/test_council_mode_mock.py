@@ -63,6 +63,7 @@ def _request(schema: type[BaseModel], effort: ReasoningEffort) -> CompletionRequ
         temperature=None,
         max_output_tokens=None,
         reasoning_effort=effort,
+        native_params={},
         cache_prefix=True,
         timeout_s=None,
         tags={},

@@ -16,8 +16,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from llm_crossjury.core.cost.pricing import PriceEntry
-from llm_crossjury.core.providers.base import Backend, Usage
+from llm_crossjury.core.providers.base import Backend, ReasoningEffort, Usage
+from llm_crossjury.core.registry.schema import Pricing
 
 
 class LedgerEntry(BaseModel):
@@ -30,6 +30,8 @@ class LedgerEntry(BaseModel):
     provider: str
     model: str
     backend: Backend
+    reasoning: ReasoningEffort
+    """Effective level; used to calibrate reasoning-token multipliers."""
     usage: Usage
     cost: Decimal | None
     """``None`` when unknown (unknown usage fields, cli backend, unpriced model)."""
@@ -106,6 +108,13 @@ class Ledger(Protocol):
 
     def summary(self, run_id: str) -> RunCostSummary: ...
 
+    def observed_reasoning_ratio(
+        self, provider: str, model_id: str, level: ReasoningEffort, min_samples: int
+    ) -> float | None:
+        """Mean ``reasoning_tokens / output_tokens`` over recorded calls, or ``None``
+        with fewer than ``min_samples`` complete observations."""
+        ...
+
 
 class SqliteLedger:
     """:class:`Ledger` stored in SQLite under the user data directory.
@@ -137,8 +146,13 @@ class SqliteLedger:
     def summary(self, run_id: str) -> RunCostSummary:
         raise NotImplementedError
 
+    def observed_reasoning_ratio(
+        self, provider: str, model_id: str, level: ReasoningEffort, min_samples: int
+    ) -> float | None:
+        raise NotImplementedError
 
-def compute_cost(usage: Usage, price: PriceEntry, *, batched: bool) -> Decimal | None:
+
+def compute_cost(usage: Usage, price: Pricing, *, batched: bool) -> Decimal | None:
     """Compute the cost of ``usage`` under ``price``.
 
     Returns ``None`` if any usage field needed for the computation is unknown.

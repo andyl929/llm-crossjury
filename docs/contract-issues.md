@@ -1,6 +1,7 @@
 # Contract issues
 
-Contract files are `src/llm_crossjury/core/schemas/**` and `src/llm_crossjury/core/providers/base.py`.
+Contract files are `src/llm_crossjury/core/schemas/**`, `src/llm_crossjury/core/providers/base.py`
+and `src/llm_crossjury/core/registry/schema.py`.
 They must not be modified without the maintainer's approval. If you find a problem
 with a contract, add an entry below and keep working against the current contract.
 Where needed, use an adapter-side workaround and note it in the entry.
@@ -31,4 +32,15 @@ _None._
   checkpoint-A agreement ratio. Added to `EXPORTED_MODELS`.
 - `providers/base.py`: new `ReasoningEffort` (`low|medium|high|default`); new required
   `CompletionRequest.reasoning_effort`; new `Capabilities.reasoning_effort` flag.
+- Status: done
+
+### CI-2: Model registry (approved by the maintainer, 2026-11-04; ADR 0006)
+- `registry/schema.py` (new contract file): `ModelEntry`, `ReasoningControl`
+  (`levels|budget|always_on|none`, `allowed`, `mapping`), `EffortMapping`, `CliFlags`,
+  `Pricing` (moved from `cost/pricing.py`'s former `PriceEntry`), `ProviderAliases`,
+  `ModelRegistryFile`. `config/pricing.yaml` is merged into `config/models.yaml`.
+- `providers/base.py`: new required `CompletionRequest.native_params` and
+  `CompletionResult.native_params_used`. `CompletionRequest.model` is always a resolved
+  id. Reasoning mapping moved from adapters to the ModelResolver.
+- `schemas/__main__.py`: also writes the config-file schemas to `schemas/config/`.
 - Status: done

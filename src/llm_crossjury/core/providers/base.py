@@ -51,9 +51,8 @@ class Role(StrEnum):
 class ReasoningEffort(StrEnum):
     """Provider-neutral reasoning/thinking effort.
 
-    Each adapter maps these onto its vendor's own controls (effort levels, thinking
-    budgets, model variants). ``DEFAULT`` sends no setting at all. If a model has no
-    such control, the value is ignored and recorded as ignored in the run record.
+    The ModelResolver maps these onto vendor-native values using the model registry
+    (``config/models.yaml``, ADR 0006). ``DEFAULT`` sends no setting at all.
     """
 
     LOW = "low"
@@ -153,7 +152,8 @@ class CompletionRequest(_Frozen):
     """A single model call."""
 
     model: str
-    """Vendor model identifier, taken from configuration (never hard-coded)."""
+    """Concrete vendor model id, resolved by ModelResolver (never an alias, never
+    hard-coded)."""
 
     prompt: Prompt
 
@@ -171,7 +171,13 @@ class CompletionRequest(_Frozen):
     max_output_tokens: int | None
 
     reasoning_effort: ReasoningEffort
-    """Mapped by the adapter; ignored (and recorded) without the capability."""
+    """Effective level after resolution (ADR 0006). Informational for adapters: the
+    vendor values to send are in ``native_params``."""
+
+    native_params: dict[str, Any]
+    """Vendor-native parameters to send verbatim: the registry mapping of
+    ``reasoning_effort`` merged with the member's ``native`` passthrough. Empty means
+    vendor defaults. Adapters must not add reasoning parameters of their own."""
 
     cache_prefix: bool
     """Request caching of ``prompt.stable_prefix`` if supported."""
@@ -194,6 +200,9 @@ class CompletionResult(_Frozen):
     finish_reason: str | None
     started_at: datetime
     latency_s: float | None
+    native_params_used: dict[str, Any]
+    """Native parameters actually sent (after any adapter-side drop of unsupported
+    keys). Recorded in run metadata."""
 
 
 class ProviderStatus(_Frozen):

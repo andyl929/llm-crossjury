@@ -69,6 +69,7 @@ class MockProvider:
             finish_reason="stop",
             started_at=datetime.now(UTC),
             latency_s=0.0,
+            native_params_used=dict(request.native_params),
         )
 
     async def count_input_tokens(self, request: CompletionRequest) -> int | None:

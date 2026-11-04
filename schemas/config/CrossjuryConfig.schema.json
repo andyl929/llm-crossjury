@@ -1,0 +1,490 @@
+{
+  "$defs": {
+    "AgreementConfig": {
+      "additionalProperties": false,
+      "description": "Claim-agreement measurement displayed at checkpoint A. Never skips by itself.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "judge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        }
+      },
+      "title": "AgreementConfig",
+      "type": "object"
+    },
+    "AnonymizeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "scrub_model_names": {
+          "default": true,
+          "title": "Scrub Model Names",
+          "type": "boolean"
+        }
+      },
+      "title": "AnonymizeConfig",
+      "type": "object"
+    },
+    "Backend": {
+      "description": "How a provider reaches the model.",
+      "enum": [
+        "api",
+        "cli",
+        "mock"
+      ],
+      "title": "Backend",
+      "type": "string"
+    },
+    "BudgetConfig": {
+      "additionalProperties": false,
+      "description": "Spending limits. Defaults are deliberately small and always printed.",
+      "properties": {
+        "run_limit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": "1.00",
+          "title": "Run Limit"
+        },
+        "confirm_above": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": "0.25",
+          "title": "Confirm Above"
+        },
+        "daily_limit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": "5.00",
+          "title": "Daily Limit"
+        },
+        "currency": {
+          "default": "USD",
+          "title": "Currency",
+          "type": "string"
+        },
+        "allow_unknown_cost": {
+          "default": false,
+          "title": "Allow Unknown Cost",
+          "type": "boolean"
+        }
+      },
+      "title": "BudgetConfig",
+      "type": "object"
+    },
+    "CostConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "use_prompt_cache": {
+          "default": true,
+          "title": "Use Prompt Cache",
+          "type": "boolean"
+        },
+        "use_batch": {
+          "default": false,
+          "title": "Use Batch",
+          "type": "boolean"
+        },
+        "reasoning_multipliers": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "default": {
+            "low": 0.5,
+            "medium": 1.0,
+            "high": 2.0,
+            "default": 1.0
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/ReasoningEffort"
+          },
+          "title": "Reasoning Multipliers",
+          "type": "object"
+        },
+        "calibration_min_samples": {
+          "default": 20,
+          "title": "Calibration Min Samples",
+          "type": "integer"
+        }
+      },
+      "title": "CostConfig",
+      "type": "object"
+    },
+    "DocumentConfig": {
+      "additionalProperties": false,
+      "description": "Document Review input handling.",
+      "properties": {
+        "max_document_tokens": {
+          "default": 50000,
+          "title": "Max Document Tokens",
+          "type": "integer"
+        },
+        "markdown_chunk_depth": {
+          "default": 2,
+          "title": "Markdown Chunk Depth",
+          "type": "integer"
+        }
+      },
+      "title": "DocumentConfig",
+      "type": "object"
+    },
+    "MemberConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "backend": {
+          "$ref": "#/$defs/Backend"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "native": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "model",
+        "backend"
+      ],
+      "title": "MemberConfig",
+      "type": "object"
+    },
+    "ReasoningEffort": {
+      "description": "Provider-neutral reasoning/thinking effort.\n\nThe ModelResolver maps these onto vendor-native values using the model registry\n(``config/models.yaml``, ADR 0006). ``DEFAULT`` sends no setting at all.",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "default"
+      ],
+      "title": "ReasoningEffort",
+      "type": "string"
+    },
+    "ResolutionMode": {
+      "enum": [
+        "normal",
+        "strict"
+      ],
+      "title": "ResolutionMode",
+      "type": "string"
+    },
+    "ReviewConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "topology": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewTopology"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ring_k": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ring K"
+        },
+        "judge": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judge"
+        }
+      },
+      "title": "ReviewConfig",
+      "type": "object"
+    },
+    "ReviewTopology": {
+      "enum": [
+        "full",
+        "ring",
+        "single_judge"
+      ],
+      "title": "ReviewTopology",
+      "type": "string"
+    },
+    "RoleDefaults": {
+      "additionalProperties": false,
+      "properties": {
+        "reasoning": {
+          "$ref": "#/$defs/ReasoningEffort"
+        }
+      },
+      "required": [
+        "reasoning"
+      ],
+      "title": "RoleDefaults",
+      "type": "object"
+    },
+    "RolesConfig": {
+      "additionalProperties": false,
+      "description": "Per-role defaults. Reviewer and agreement-judge calls always use these; answerer\nand chairman calls use them unless the member sets ``reasoning``.",
+      "properties": {
+        "answerer": {
+          "$ref": "#/$defs/RoleDefaults",
+          "default": {
+            "reasoning": "default"
+          }
+        },
+        "reviewer": {
+          "$ref": "#/$defs/RoleDefaults",
+          "default": {
+            "reasoning": "low"
+          }
+        },
+        "agreement_judge": {
+          "$ref": "#/$defs/RoleDefaults",
+          "default": {
+            "reasoning": "low"
+          }
+        },
+        "chairman": {
+          "$ref": "#/$defs/RoleDefaults",
+          "default": {
+            "reasoning": "default"
+          }
+        }
+      },
+      "title": "RolesConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "members": {
+      "items": {
+        "$ref": "#/$defs/MemberConfig"
+      },
+      "title": "Members",
+      "type": "array"
+    },
+    "chair": {
+      "$ref": "#/$defs/MemberConfig"
+    },
+    "chairman_excluded": {
+      "default": false,
+      "title": "Chairman Excluded",
+      "type": "boolean"
+    },
+    "roles": {
+      "$ref": "#/$defs/RolesConfig",
+      "default": {
+        "answerer": {
+          "reasoning": "default"
+        },
+        "reviewer": {
+          "reasoning": "low"
+        },
+        "agreement_judge": {
+          "reasoning": "low"
+        },
+        "chairman": {
+          "reasoning": "default"
+        }
+      }
+    },
+    "review": {
+      "$ref": "#/$defs/ReviewConfig",
+      "default": {
+        "topology": null,
+        "ring_k": null,
+        "judge": null
+      }
+    },
+    "agreement": {
+      "$ref": "#/$defs/AgreementConfig",
+      "default": {
+        "enabled": true,
+        "judge": null,
+        "threshold": null
+      }
+    },
+    "budget": {
+      "$ref": "#/$defs/BudgetConfig",
+      "default": {
+        "run_limit": "1.00",
+        "confirm_above": "0.25",
+        "daily_limit": "5.00",
+        "currency": "USD",
+        "allow_unknown_cost": false
+      }
+    },
+    "cost": {
+      "$ref": "#/$defs/CostConfig",
+      "default": {
+        "use_prompt_cache": true,
+        "use_batch": false,
+        "reasoning_multipliers": {
+          "default": 1.0,
+          "high": 2.0,
+          "low": 0.5,
+          "medium": 1.0
+        },
+        "calibration_min_samples": 20
+      }
+    },
+    "document": {
+      "$ref": "#/$defs/DocumentConfig",
+      "default": {
+        "max_document_tokens": 50000,
+        "markdown_chunk_depth": 2
+      }
+    },
+    "anonymize": {
+      "$ref": "#/$defs/AnonymizeConfig",
+      "default": {
+        "scrub_model_names": true
+      }
+    },
+    "resolution": {
+      "$ref": "#/$defs/ResolutionMode",
+      "default": "normal"
+    },
+    "output_language": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output Language"
+    },
+    "models_path": {
+      "default": "config\\models.yaml",
+      "format": "path",
+      "title": "Models Path",
+      "type": "string"
+    },
+    "store_content": {
+      "default": false,
+      "title": "Store Content",
+      "type": "boolean"
+    },
+    "checkpoint_retention_days": {
+      "default": 7,
+      "title": "Checkpoint Retention Days",
+      "type": "integer"
+    },
+    "data_dir": {
+      "anyOf": [
+        {
+          "format": "path",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Data Dir"
+    }
+  },
+  "required": [
+    "members",
+    "chair"
+  ],
+  "title": "CrossjuryConfig",
+  "type": "object"
+}

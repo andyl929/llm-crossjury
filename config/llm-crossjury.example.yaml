@@ -1,63 +1,79 @@
 # Example run configuration. Copy to llm-crossjury.yaml and edit. This file holds no
-# secrets (keys come from the environment only). Model ids are placeholders: fill
-# them from each vendor's documentation. Every value below other than members/chair
-# shows the built-in default.
+# secrets (keys come from the environment only) and no model facts: `model` is an
+# alias (fast | balanced | best) or a concrete id from config/models.yaml. The
+# aliases in the shipped registry are null until you add verified entries.
+# Every value below other than members/chair shows the built-in default.
 
 members:
   - id: claude
     provider: anthropic
-    model: "<anthropic model id>"
+    model: balanced
     backend: api
-    reasoning_effort: default   # low | medium | high | default
+    reasoning: null           # low | medium | high | default; null = roles.answerer
+    native: null              # vendor-native params, passed through verbatim
   - id: gpt
     provider: openai
-    model: "<openai model id>"
+    model: balanced
     backend: api
   - id: gemini
     provider: gemini
-    model: "<gemini model id>"
+    model: balanced
     backend: api
   - id: grok
     provider: xai
-    model: "<xai model id>"
+    model: balanced
     backend: api
 
 chair:
   id: chair
   provider: anthropic
-  model: "<anthropic model id>"
+  model: best
   backend: api
-chairman_excluded: false   # true: drop members identical to the chair
+chairman_excluded: false     # true: drop members identical to the chair
+
+roles:                        # reviewer and agreement_judge always use these
+  answerer: { reasoning: default }
+  reviewer: { reasoning: low }
+  agreement_judge: { reasoning: low }
+  chairman: { reasoning: default }
 
 review:
-  topology: null            # null = auto (full <= 3 answers, ring >= 4) | full | ring | single_judge
-  ring_k: 1
-  judge: null               # member id for single_judge
-  reasoning_effort: low
+  topology: null              # null = auto (full <= 3 answers, ring >= 4) | full | ring | single_judge
+  ring_k: null                # null = 2; 1 = issues only, no ranking (Borda skipped)
+  judge: null                 # member id for single_judge
 
-agreement:                  # shown at checkpoint A; never skips review by itself
+agreement:                    # shown at checkpoint A; never skips review by itself
   enabled: true
-  judge: null               # a cheap model: {id, provider, model, backend}
-  reasoning_effort: low
-  threshold: null           # recommend skipping review at/above this ratio (TBD by evaluation)
+  judge: null                 # e.g. {id: judge, provider: openai, model: fast, backend: api}
+  threshold: null             # recommend skipping review at/above this ratio (TBD by evaluation)
 
-budget:                     # printed at the start of every run
+budget:                       # printed at the start of every run
   run_limit: "1.00"
   confirm_above: "0.25"
   daily_limit: "5.00"
   currency: USD
-  allow_unknown_cost: false # must be true to use any cli-backend member
+  allow_unknown_cost: false   # must be true to use any cli-backend member
 
 cost:
   use_prompt_cache: true
   use_batch: false
+  reasoning_multipliers:      # reasoning tokens = visible output x multiplier (provisional)
+    low: 0.5
+    medium: 1.0
+    high: 2.0
+    default: 1.0
+  calibration_min_samples: 20 # then use ledger-observed ratios instead
 
 document:
-  max_document_tokens: 50000  # hard limit (estimated); provisional default
+  max_document_tokens: 50000  # hard limit (estimated)
   markdown_chunk_depth: 2     # '#' and '##' start chunks; LaTeX: \chapter, \section
 
-output_language: null       # null = follow the input language; e.g. "de"
-pricing_path: config/pricing.yaml
-store_content: false        # true: keep prompts/responses in permanent run records
+anonymize:
+  scrub_model_names: true     # auto-off for runs whose input mentions model/vendor names
+
+resolution: normal            # strict: unsupported reasoning level is an error
+output_language: null         # null = follow the input language; e.g. "de"
+models_path: config/models.yaml
+store_content: false          # true: keep prompts/responses in permanent run records
 checkpoint_retention_days: 7
-data_dir: null              # override platformdirs location
+data_dir: null                # override platformdirs location

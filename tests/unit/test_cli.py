@@ -19,6 +19,8 @@ runner = CliRunner()
         ["cost", "estimate", "--help"],
         ["cost", "report", "--help"],
         ["providers", "check", "--help"],
+        ["models", "list", "--help"],
+        ["models", "refresh", "--help"],
     ],
 )
 def test_help(args: list[str]) -> None:

@@ -21,8 +21,10 @@ app = typer.Typer(
 )
 cost_app = typer.Typer(help="Estimate and report costs.", no_args_is_help=True)
 providers_app = typer.Typer(help="Inspect configured providers.", no_args_is_help=True)
+models_app = typer.Typer(help="Inspect the model registry.", no_args_is_help=True)
 app.add_typer(cost_app, name="cost")
 app.add_typer(providers_app, name="providers")
+app.add_typer(models_app, name="models")
 
 ConfigOpt = Annotated[
     Path | None,
@@ -40,6 +42,13 @@ InputOpt = Annotated[
 PresetOpt = Annotated[
     str | None, typer.Option("--preset", help="Document Review preset, e.g. 'paper'.")
 ]
+StrictOpt = Annotated[
+    bool,
+    typer.Option(
+        "--strict",
+        help="Fail if a member's reasoning level is unsupported (default: downgrade + warn).",
+    ),
+]
 BudgetOpt = Annotated[
     str | None,
     typer.Option("--budget", help="Override the per-run limit (decimal, config currency)."),
@@ -54,6 +63,7 @@ def run(
     preset: PresetOpt = None,
     config: ConfigOpt = None,
     budget: BudgetOpt = None,
+    strict: StrictOpt = False,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Skip the cost confirmation prompt.")
     ] = False,
@@ -80,7 +90,8 @@ def run(
     """Estimate, confirm, then run a task in the chosen mode.
 
     Always prints the effective budget (run limit, confirmation threshold, daily
-    limit and today's spend) before the estimate.
+    limit and today's spend), then each member's resolved model, backend and native
+    reasoning parameters, then the estimate.
     """
     raise NotImplementedError
 
@@ -105,8 +116,9 @@ def cost_estimate(
     input_file: InputOpt = None,
     preset: PresetOpt = None,
     config: ConfigOpt = None,
+    strict: StrictOpt = False,
 ) -> None:
-    """Show the estimated cost range of a run without making any model call."""
+    """Show resolved models and the estimated cost range without making any model call."""
     raise NotImplementedError
 
 
@@ -127,6 +139,28 @@ def providers_check(
     config: ConfigOpt = None,
 ) -> None:
     """Check that configured providers are reachable. Spends no tokens; prints no secrets."""
+    raise NotImplementedError
+
+
+@models_app.command("list")
+def models_list(
+    provider: Annotated[
+        str | None, typer.Option("--provider", "-p", help="Only this provider.")
+    ] = None,
+) -> None:
+    """List registry entries and aliases with backends, reasoning control, pricing
+    status and last_verified dates. Reads config/models.yaml only; no network."""
+    raise NotImplementedError
+
+
+@models_app.command("refresh")
+def models_refresh(
+    provider: Annotated[
+        str | None, typer.Option("--provider", "-p", help="Only this provider.")
+    ] = None,
+) -> None:
+    """Compare the registry with each vendor's model-list endpoint and print the
+    differences. Never edits config/models.yaml and spends no tokens."""
     raise NotImplementedError
 
 

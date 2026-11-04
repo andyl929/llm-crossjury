@@ -1,0 +1,482 @@
+{
+  "$defs": {
+    "Backend": {
+      "description": "How a provider reaches the model.",
+      "enum": [
+        "api",
+        "cli",
+        "mock"
+      ],
+      "title": "Backend",
+      "type": "string"
+    },
+    "CliFlags": {
+      "additionalProperties": false,
+      "description": "Argument templates for the ``cli`` backend.\n\nEach template is a list of argv tokens. ``{model}`` and ``{value}`` are the only\nplaceholders, and they are substituted into a single token each; values come from\nthis registry, never from user or model text (ADR 0002).",
+      "properties": {
+        "model": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model"
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reasoning"
+        }
+      },
+      "required": [
+        "model",
+        "reasoning"
+      ],
+      "title": "CliFlags",
+      "type": "object"
+    },
+    "EffortMapping": {
+      "additionalProperties": false,
+      "description": "Native value for each portable level. ``None`` = level not supported.",
+      "properties": {
+        "low": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Low"
+        },
+        "medium": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Medium"
+        },
+        "high": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "High"
+        }
+      },
+      "required": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "EffortMapping",
+      "type": "object"
+    },
+    "ModelEntry": {
+      "additionalProperties": false,
+      "description": "Everything known about one vendor model.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model_id": {
+          "title": "Model Id",
+          "type": "string"
+        },
+        "backends": {
+          "items": {
+            "$ref": "#/$defs/Backend"
+          },
+          "title": "Backends",
+          "type": "array"
+        },
+        "reasoning_control": {
+          "$ref": "#/$defs/ReasoningControl"
+        },
+        "cli_flags": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CliFlags"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context_window": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Context Window"
+        },
+        "max_output": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max Output"
+        },
+        "structured_output": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Structured Output"
+        },
+        "pricing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pricing"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Url"
+        },
+        "last_verified": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Verified"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        }
+      },
+      "required": [
+        "provider",
+        "model_id",
+        "backends",
+        "reasoning_control",
+        "cli_flags",
+        "context_window",
+        "max_output",
+        "structured_output",
+        "pricing",
+        "source_url",
+        "last_verified",
+        "notes"
+      ],
+      "title": "ModelEntry",
+      "type": "object"
+    },
+    "Pricing": {
+      "additionalProperties": false,
+      "description": "Prices in ``currency`` per 1M tokens (fields as in the former pricing.yaml).",
+      "properties": {
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "input_per_mtok": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Input Per Mtok"
+        },
+        "output_per_mtok": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Output Per Mtok"
+        },
+        "cached_input_per_mtok": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cached Input Per Mtok"
+        },
+        "cache_write_per_mtok": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cache Write Per Mtok"
+        },
+        "reasoning_per_mtok": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reasoning Per Mtok"
+        },
+        "batch_multiplier": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Batch Multiplier"
+        }
+      },
+      "required": [
+        "currency",
+        "input_per_mtok",
+        "output_per_mtok",
+        "cached_input_per_mtok",
+        "cache_write_per_mtok",
+        "reasoning_per_mtok",
+        "batch_multiplier"
+      ],
+      "title": "Pricing",
+      "type": "object"
+    },
+    "ProviderAliases": {
+      "additionalProperties": false,
+      "description": "Portable aliases for one provider; each value is a ``model_id`` in the registry.",
+      "properties": {
+        "fast": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fast"
+        },
+        "balanced": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Balanced"
+        },
+        "best": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Best"
+        }
+      },
+      "required": [
+        "fast",
+        "balanced",
+        "best"
+      ],
+      "title": "ProviderAliases",
+      "type": "object"
+    },
+    "ReasoningControl": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/ReasoningControlType"
+        },
+        "parameter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parameter"
+        },
+        "allowed": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Allowed"
+        },
+        "mapping": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EffortMapping"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "parameter",
+        "allowed",
+        "mapping"
+      ],
+      "title": "ReasoningControl",
+      "type": "object"
+    },
+    "ReasoningControlType": {
+      "description": "How a model's reasoning is controlled.",
+      "enum": [
+        "levels",
+        "budget",
+        "always_on",
+        "none"
+      ],
+      "title": "ReasoningControlType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Top-level shape of ``config/models.yaml``.",
+  "properties": {
+    "schema_version": {
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "models": {
+      "items": {
+        "$ref": "#/$defs/ModelEntry"
+      },
+      "title": "Models",
+      "type": "array"
+    },
+    "aliases": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ProviderAliases"
+      },
+      "title": "Aliases",
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "models",
+    "aliases"
+  ],
+  "title": "ModelRegistryFile",
+  "type": "object"
+}
