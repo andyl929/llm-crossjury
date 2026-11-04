@@ -116,7 +116,7 @@ class Capabilities(_Frozen):
     temperature: bool
     """Honors a caller-supplied sampling temperature."""
 
-    reasoning_effort: bool
+    reasoning: bool
     """Maps ReasoningEffort LOW/MEDIUM/HIGH onto a vendor control."""
 
 
@@ -170,13 +170,13 @@ class CompletionRequest(_Frozen):
 
     max_output_tokens: int | None
 
-    reasoning_effort: ReasoningEffort
+    reasoning: ReasoningEffort
     """Effective level after resolution (ADR 0006). Informational for adapters: the
     vendor values to send are in ``native_params``."""
 
     native_params: dict[str, Any]
     """Vendor-native parameters to send verbatim: the registry mapping of
-    ``reasoning_effort`` merged with the member's ``native`` passthrough. Empty means
+    ``reasoning`` merged with the member's ``native`` passthrough. Empty means
     vendor defaults. Adapters must not add reasoning parameters of their own."""
 
     cache_prefix: bool

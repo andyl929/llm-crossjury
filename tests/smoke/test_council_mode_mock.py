@@ -62,7 +62,7 @@ def _request(schema: type[BaseModel], effort: ReasoningEffort) -> CompletionRequ
         response_schema=strict_json_schema(schema),
         temperature=None,
         max_output_tokens=None,
-        reasoning_effort=effort,
+        reasoning=effort,
         native_params={},
         cache_prefix=True,
         timeout_s=None,
@@ -190,7 +190,7 @@ def test_empty_council_flow_with_checkpoints() -> None:
     assert ctx.artifacts[StageName.FINAL_SYNTHESIS.value] == EMPTY_SYNTHESIS
     assert all(len(p.requests) == 1 for p in members.values())
     assert members["claude"].requests[0].response_schema == strict_json_schema(Stage1Answer)
-    assert reviewer.requests[0].reasoning_effort is ReasoningEffort.LOW
+    assert reviewer.requests[0].reasoning is ReasoningEffort.LOW
     assert len(chair.requests) == 2
 
 

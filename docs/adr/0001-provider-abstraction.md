@@ -4,6 +4,7 @@
 - Date: 2026-11-04
 - Amended: 2026-11-04 (pre-phase-1 decisions; see SPEC §10 Decided)
 - Partly superseded: rule 5 by ADR 0006 (2026-11-04)
+- Amended: 2026-11-04 (clarification: `reasoning_effort` fields renamed to `reasoning`, CI-3)
 
 ## Context
 
@@ -31,13 +32,13 @@ Schema for structured output.
    Each is `int | None`, and **`None` means unknown, never zero**. Cost computation
    returns `None` (unknown) instead of guessing.
 4. **Capabilities are declared per model.** There are five flags: `structured_output`,
-   `caching`, `batch`, `temperature`, `reasoning_effort`. The orchestrator uses only
+   `caching`, `batch`, `temperature`, `reasoning`. The orchestrator uses only
    declared capabilities and otherwise falls back (format instructions plus
    validation; sequential calls; temperature or effort ignored and recorded as
    ignored).
 5. *(Superseded by ADR 0006: the ModelResolver maps levels via the registry, and
    adapters send `native_params` verbatim.)* **Reasoning effort is provider-neutral.**
-   `CompletionRequest.reasoning_effort` is one of `low | medium | high | default`. Each
+   `CompletionRequest.reasoning` is one of `low | medium | high | default`. Each
    adapter maps it internally to its vendor's controls (effort levels, thinking
    budgets). `default` sends no setting.
    Stages choose the effort level: peer review and the agreement judge use `low` by

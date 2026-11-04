@@ -45,7 +45,7 @@ class MockProvider:
             caching=False,
             batch=False,
             temperature=True,
-            reasoning_effort=False,
+            reasoning=False,
         )
         self.requests: list[CompletionRequest] = []
 
