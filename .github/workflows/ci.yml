@@ -1,0 +1,64 @@
+# Action versions verified on 2026-11-04 against the official sources:
+#   actions/checkout   v7.0.1  https://github.com/actions/checkout/releases (marked Latest)
+#   astral-sh/setup-uv v10.3.3 https://github.com/astral-sh/setup-uv/releases (marked Latest)
+# Pinned by full commit SHA (tag SHAs cross-checked with `git ls-remote --tags`).
+# uv itself is pinned to the version that produced uv.lock.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+    env:
+      # Belt and braces: no real keys ever reach CI. pytest-socket also blocks the network.
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+      GEMINI_API_KEY: ""
+      XAI_API_KEY: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and set the Python version
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.24"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Install the project
+        run: uv sync --locked --dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy
+
+      - name: Pytest
+        run: uv run pytest
+
+      - name: Schema export is up to date
+        shell: bash
+        run: |
+          uv run python -m llm_crossjury.core.schemas schemas
+          git diff --exit-code -- schemas/

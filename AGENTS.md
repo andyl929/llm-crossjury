@@ -35,7 +35,9 @@ uv run python -m llm_crossjury.core.schemas schemas   # regenerate JSON schemas
 ```
 
 All four checks (pytest, ruff check, ruff format --check, mypy) must pass before
-every commit.
+every commit. CI (`.github/workflows/ci.yml`) runs them on Ubuntu and Windows with
+Python 3.11 and 3.12, plus a schema-drift check. Pin every action to a full commit
+SHA, and verify the version against the action's official release page first.
 
 ## 3. Coding standards
 
