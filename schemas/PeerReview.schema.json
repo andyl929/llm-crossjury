@@ -23,7 +23,7 @@
                   "type": "string"
                 },
                 "claim_id": {
-                  "description": "Id of the affected claim in the reviewed response, if any.",
+                  "description": "Id of the affected claim (or edit, in Document Review) in the reviewed response.",
                   "type": [
                     "string",
                     "null"
@@ -67,26 +67,20 @@
               "type": "string"
             },
             "type": "array"
-          },
-          "score_rationale": {
-            "description": "Why the score follows from the issues and strengths above.",
-            "type": "string"
-          },
-          "score": {
-            "description": "Overall quality on a 1-10 scale (range validated after parsing).",
-            "type": "integer"
           }
         },
         "required": [
           "target",
           "issues",
-          "strengths",
-          "score_rationale",
-          "score"
+          "strengths"
         ],
         "type": "object"
       },
       "type": "array"
+    },
+    "ranking_rationale": {
+      "description": "Why the ranking below follows from the issues and strengths above.",
+      "type": "string"
     },
     "ranking": {
       "description": "Assigned target labels, best first. Must be a permutation of reviewed targets.",
@@ -94,15 +88,12 @@
         "type": "string"
       },
       "type": "array"
-    },
-    "ranking_rationale": {
-      "type": "string"
     }
   },
   "required": [
     "reviews",
-    "ranking",
-    "ranking_rationale"
+    "ranking_rationale",
+    "ranking"
   ],
   "type": "object"
 }

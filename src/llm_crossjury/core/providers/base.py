@@ -48,6 +48,20 @@ class Role(StrEnum):
     ASSISTANT = "assistant"
 
 
+class ReasoningEffort(StrEnum):
+    """Provider-neutral reasoning/thinking effort.
+
+    Each adapter maps these onto its vendor's own controls (effort levels, thinking
+    budgets, model variants). ``DEFAULT`` sends no setting at all. If a model has no
+    such control, the value is ignored and recorded as ignored in the run record.
+    """
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    DEFAULT = "default"
+
+
 class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -103,6 +117,9 @@ class Capabilities(_Frozen):
     temperature: bool
     """Honors a caller-supplied sampling temperature."""
 
+    reasoning_effort: bool
+    """Maps ReasoningEffort LOW/MEDIUM/HIGH onto a vendor control."""
+
 
 class Usage(_Frozen):
     """Token usage of a single completion.
@@ -152,6 +169,9 @@ class CompletionRequest(_Frozen):
     """Ignored (and recorded as such) when the provider lacks ``temperature``."""
 
     max_output_tokens: int | None
+
+    reasoning_effort: ReasoningEffort
+    """Mapped by the adapter; ignored (and recorded) without the capability."""
 
     cache_prefix: bool
     """Request caching of ``prompt.stable_prefix`` if supported."""

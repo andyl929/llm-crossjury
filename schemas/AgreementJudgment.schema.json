@@ -1,0 +1,76 @@
+{
+  "additionalProperties": false,
+  "description": "The judge's grouping of all stage-1 claims.",
+  "properties": {
+    "groups": {
+      "description": "Every input claim appears in exactly one group's supporting or contradicting list.",
+      "items": {
+        "additionalProperties": false,
+        "description": "Claims that make the same point, plus claims that contradict it.",
+        "properties": {
+          "statement": {
+            "description": "The shared point, stated neutrally in one sentence.",
+            "type": "string"
+          },
+          "supporting": {
+            "description": "Claims that assert this point.",
+            "items": {
+              "additionalProperties": false,
+              "description": "A pointer to one claim of one anonymized answer.",
+              "properties": {
+                "label": {
+                  "description": "Anonymous label of the answer, e.g. \"Response A\".",
+                  "type": "string"
+                },
+                "claim_id": {
+                  "description": "Claim id within that answer, e.g. \"c2\".",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "claim_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "contradicting": {
+            "description": "Claims that assert the opposite or an incompatible point.",
+            "items": {
+              "additionalProperties": false,
+              "description": "A pointer to one claim of one anonymized answer.",
+              "properties": {
+                "label": {
+                  "description": "Anonymous label of the answer, e.g. \"Response A\".",
+                  "type": "string"
+                },
+                "claim_id": {
+                  "description": "Claim id within that answer, e.g. \"c2\".",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "claim_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "statement",
+          "supporting",
+          "contradicting"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "groups"
+  ],
+  "type": "object"
+}

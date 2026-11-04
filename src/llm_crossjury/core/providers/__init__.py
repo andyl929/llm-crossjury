@@ -15,6 +15,7 @@ from llm_crossjury.core.providers.base import (
     Prompt,
     Provider,
     ProviderStatus,
+    ReasoningEffort,
     Role,
     Usage,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "Prompt",
     "Provider",
     "ProviderStatus",
+    "ReasoningEffort",
     "Role",
     "Usage",
 ]

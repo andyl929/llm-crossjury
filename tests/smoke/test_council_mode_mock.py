@@ -26,7 +26,13 @@ from llm_crossjury.core.orchestrator import (
     RunContext,
     StageName,
 )
-from llm_crossjury.core.providers.base import CompletionRequest, Message, Prompt, Role
+from llm_crossjury.core.providers.base import (
+    CompletionRequest,
+    Message,
+    Prompt,
+    ReasoningEffort,
+    Role,
+)
 from llm_crossjury.core.providers.mock import MockProvider
 from llm_crossjury.core.schemas import PeerReview, Stage1Answer, Synthesis, strict_json_schema
 
@@ -45,6 +51,7 @@ def _request(model: str, schema: type[Stage1Answer | PeerReview | Synthesis]) ->
         response_schema=strict_json_schema(schema),
         temperature=None,
         max_output_tokens=None,
+        reasoning_effort=ReasoningEffort.DEFAULT,
         cache_prefix=True,
         timeout_s=None,
         tags={},

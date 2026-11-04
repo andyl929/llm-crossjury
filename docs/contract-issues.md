@@ -19,4 +19,16 @@ Template:
 
 ## Open issues
 
-_None yet._
+_None._
+
+## Approved changes
+
+### CI-1: Pre-phase-1 contract changes (approved by the maintainer, 2026-11-04)
+- `schemas/review.py`: removed `TargetReview.score` and `TargetReview.score_rationale`.
+  `PeerReview` field order is now `reviews`, `ranking_rationale`, `ranking`. Rankings
+  are Borda-aggregated in code.
+- `schemas/agreement.py` (new): `ClaimRef`, `ClaimGroup`, `AgreementJudgment` for the
+  checkpoint-A agreement ratio. Added to `EXPORTED_MODELS`.
+- `providers/base.py`: new `ReasoningEffort` (`low|medium|high|default`); new required
+  `CompletionRequest.reasoning_effort`; new `Capabilities.reasoning_effort` flag.
+- Status: done

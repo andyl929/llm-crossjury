@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, JsonSchemaValue
 from pydantic_core import core_schema
 
+from llm_crossjury.core.schemas.agreement import AgreementJudgment
 from llm_crossjury.core.schemas.edits import EditList
 from llm_crossjury.core.schemas.review import PeerReview
 from llm_crossjury.core.schemas.stage1 import Stage1Answer
@@ -28,6 +29,7 @@ from llm_crossjury.core.schemas.synthesis import DocumentSynthesis, Synthesis
 
 EXPORTED_MODELS: tuple[type[BaseModel], ...] = (
     Stage1Answer,
+    AgreementJudgment,
     PeerReview,
     EditList,
     Synthesis,

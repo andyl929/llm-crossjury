@@ -41,7 +41,11 @@ class MockProvider:
         self.name = name
         self._responder = responder
         self._capabilities = capabilities or Capabilities(
-            structured_output=True, caching=False, batch=False, temperature=True
+            structured_output=True,
+            caching=False,
+            batch=False,
+            temperature=True,
+            reasoning_effort=False,
         )
         self.requests: list[CompletionRequest] = []
 
