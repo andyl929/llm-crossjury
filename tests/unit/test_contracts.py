@@ -33,8 +33,9 @@ def test_usage_allows_unknown_fields() -> None:
     assert usage.output_tokens is None
 
 
-def test_grok_cli_is_skipped_with_reason() -> None:
-    assert GrokCliProvider.skipped_reason
+def test_grok_cli_is_not_pre_skipped() -> None:
+    assert GrokCliProvider.skipped_reason is None
+    assert GrokCliProvider.command == "grok"
 
 
 def test_network_is_blocked() -> None:
