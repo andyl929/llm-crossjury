@@ -1,0 +1,7 @@
+# Document Review preset: academic paper revision. Placeholder (design phase).
+name: paper
+description: Revise an academic paper for correctness, clarity, structure and consistency.
+instructions: >-
+  TODO(implementation phase): reviewer instructions for academic papers.
+categories: [correctness, clarity, structure, consistency, citation, style, grammar, formatting]
+prompt_version: document_review/edit_list.v1
