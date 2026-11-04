@@ -7,8 +7,13 @@
 | [0003](0003-cost-control.md) | Cost control strategy | Accepted |
 | [0004](0004-document-mode-edit-list.md) | Document Review returns an edit list | Accepted |
 | [0005](0005-clean-room-and-license.md) | Clean-room implementation and MIT license | Accepted |
+| [0006](0006-model-registry.md) | Model registry, aliases and reasoning resolution | Accepted (supersedes 0001 rule 5) |
 
 Each ADR has these sections: Status, Context, Decision, Consequences, Alternatives.
-A decision that is replaced entirely gets a new ADR that supersedes the old one.
-Amendments that the maintainer approves are made in place and dated in the
-`Amended:` line.
+Change rules:
+
+- **Small clarifications** (wording, references, defaults that do not change the
+  decision) may be made in place, dated in an `Amended:` line.
+- **Overturning a decision** (fully or in part) requires a new ADR. The new ADR names
+  what it supersedes, and the old ADR gets a `Superseded:` / `Partly superseded:`
+  line pointing to it. The old text is not rewritten.

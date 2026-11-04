@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-11-04
 - Amended: 2026-11-04 (pre-phase-1 decisions; see SPEC §10 Decided)
+- Amended: 2026-11-04 (clarification: prices now live in the model registry, ADR 0006;
+  ring default k = 2)
 
 ## Context
 
@@ -15,8 +17,8 @@ by design. Prices change often, and anything hard-coded or remembered goes stale
 
 ### 1. Prices come only from configuration
 
-- `config/pricing.yaml` is the single source. Every entry has `source_url` and
-  `last_verified`. The repository ships with **no entries**. There are no built-in
+- The `pricing` block of the model registry `config/models.yaml` (ADR 0006) is the
+  single source. Only entries with `source_url` and `last_verified` are used. The repository ships with **no entries**. There are no built-in
   defaults and no prices filled from memory.
 - An `api` model without an entry is unpriceable, and the run is **refused**. There
   is no override.
@@ -79,7 +81,8 @@ The effective values and today's spend are printed at the start of every run.
 | `single_judge` | 1 | Cheapest. One judge reviews everything (weaker independence) |
 
 Default (no topology configured): `full` for ≤ 3 reviewed answers, `ring` with
-k = 1 for ≥ 4. Peer review runs at reasoning effort `low` by default.
+k = 2 for ≥ 4 (k = 1 = "issues only", no ranking). Peer review runs at reasoning
+effort `low` by default (role `reviewer`).
 
 The implementation sends **one call per reviewer, carrying all of that reviewer's
 targets** (`ReviewAssignment.targets`). This keeps the call count at n for `full`
@@ -108,7 +111,9 @@ while the token count still grows with n·(n−1).
 
 ## Consequences
 
-- Users must maintain `pricing.yaml`. That is the price of never shipping wrong prices.
+- Users must maintain `config/models.yaml`. That is the price of never shipping wrong prices.
+- Reasoning tokens are estimated with configurable per-level multipliers and later
+  calibrated from the ledger (ADR 0006 §5).
 - Estimates are ranges. Reports compare the estimate against actual spend so the
   heuristics can be tuned.
 - The reservation scheme can refuse a call that would in fact have fit. We choose

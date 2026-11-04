@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-04
 - Amended: 2026-11-04 (pre-phase-1 decisions; see SPEC §10 Decided)
+- Partly superseded: rule 5 by ADR 0006 (2026-11-04)
 
 ## Context
 
@@ -34,9 +35,11 @@ Schema for structured output.
    declared capabilities and otherwise falls back (format instructions plus
    validation; sequential calls; temperature or effort ignored and recorded as
    ignored).
-5. **Reasoning effort is provider-neutral.** `CompletionRequest.reasoning_effort` is
-   one of `low | medium | high | default`. Each adapter maps it internally to its
-   vendor's controls (effort levels, thinking budgets). `default` sends no setting.
+5. *(Superseded by ADR 0006: the ModelResolver maps levels via the registry, and
+   adapters send `native_params` verbatim.)* **Reasoning effort is provider-neutral.**
+   `CompletionRequest.reasoning_effort` is one of `low | medium | high | default`. Each
+   adapter maps it internally to its vendor's controls (effort levels, thinking
+   budgets). `default` sends no setting.
    Stages choose the effort level: peer review and the agreement judge use `low` by
    default, and members use their configured level.
 6. **Errors never carry secrets.** The error types are `ProviderUnavailableError`,

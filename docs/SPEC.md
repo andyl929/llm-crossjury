@@ -1,6 +1,6 @@
 # llm-crossjury: Product Specification (v1)
 
-Status: draft for review · Phase: design/skeleton (phase 0 accepted; pre-phase-1 decisions applied)
+Status: draft for review · Phase: design/skeleton (phase 0 accepted; pre-phase-1 decisions and model registry applied)
 
 ## 1. Purpose
 
@@ -18,7 +18,9 @@ list of concrete, checkable edits. Academic paper revision is one preset of that
 
 | Term | Meaning |
 |---|---|
-| Member | A configured (provider, model, backend) that answers the task |
+| Member | A configured (provider, model or alias, backend) that answers the task |
+| Registry | `config/models.yaml`: model ids, backends, reasoning controls, CLI flags, limits, prices (ADR 0006) |
+| Alias | `fast` / `balanced` / `best` per provider, pointing to a registry entry |
 | Chair | The model that writes the synthesis. It may also be a member (§3.2) |
 | Label | Anonymous name of an answer within a run, e.g. `Response B`. Shuffled per run |
 | Claim | An atomic, checkable statement a member extracts from its own answer |
@@ -68,7 +70,7 @@ Every mode starts with **Stage 0: Plan & estimate**:
 | | |
 |---|---|
 | Input | Task text, mode, config (members, chair, topology, budget), optional document and preset |
-| Output | The effective budget is printed (run limit, confirmation threshold, daily limit, today's spend). Then the `CostEstimate` (range, unpriced calls, assumptions). The run is **refused** if any `api` model lacks a price entry, if the high estimate exceeds the run limit or the remaining daily budget, or if a `cli` member is configured without `allow_unknown_cost: true`. The user must confirm if the high estimate exceeds `confirm_above` |
+| Output | The effective budget is printed (run limit, confirmation threshold, daily limit, today's spend). Then every member's **resolved** model (alias → id), backend and native reasoning parameter, with any downgrade warnings (§5.1). Then the `CostEstimate`, including estimated reasoning tokens (range, unpriced calls, assumptions). The run is **refused** if any `api` model lacks a verified registry price, if the high estimate exceeds the run limit or the remaining daily budget, or if a `cli` member is configured without `allow_unknown_cost: true`. The user must confirm if the high estimate exceeds `confirm_above` |
 
 Unless stated otherwise, member and chair calls ask for structured output that follows
 the schemas in `core/schemas` (`schemas/*.schema.json`).
@@ -86,7 +88,7 @@ There are no checkpoints, no review, and no chair.
 
 | Stage | Input | Output |
 |---|---|---|
-| 1. Answer | Task | `Stage1Answer` per member, in parallel, each at its own `reasoning_effort`. Labels are assigned by random shuffle. Answers are anonymity-scrubbed (§6) |
+| 1. Answer | Task | `Stage1Answer` per member, in parallel, each at its resolved reasoning level (role `answerer`). Labels are assigned by random shuffle. Answers are anonymity-scrubbed (§6) |
 | 1b. Agreement | All claims (labels only) | A cheap judge model (reasoning effort `low`) returns an `AgreementJudgment` (claim groups with supporting and contradicting claim refs). The **agreement ratio** is computed in code: the number of groups supported by every kept answer and contradicted by none, divided by the number of groups |
 | **Checkpoint A: Prune / skip** | Labelled answers, agreement ratio, estimated cost of peer review (= the saving if skipped), a recommendation if the ratio ≥ the configured threshold | `PruneDecision(drop=[labels], skip_review=bool)`. **Nothing is skipped automatically** |
 | 2. Peer review | Task + kept answers (labels only) + topology | `PeerReview` per review call: per target, issues (verbatim quote, problem, severity, optional fix) and strengths, then a ranking rationale and a **ranking**. No numeric scores. Reasoning effort `low` by default |
@@ -102,8 +104,10 @@ With `chairman_excluded: true`, any member identical to the chair (same provider
 model and backend) is removed from the answer and review stages.
 
 **Default topology.** If `review.topology` is unset: `full` when ≤ 3 answers survive
-checkpoint A, and `ring` with k = 1 when there are 4 or more. Any topology can be
-configured explicitly.
+checkpoint A, and `ring` with **k = 2** when there are 4 or more. Any topology can be
+configured explicitly. `ring` with **k = 1** is kept as the **"issues only"** mode: each
+reviewer sees one target, so rankings carry no information. Borda aggregation is
+skipped, and the report shows issue counts by severity without a ranking.
 
 If the draft has no disputes, checkpoint B is satisfied automatically and the run goes
 straight to stage 4.
@@ -161,8 +165,9 @@ Paused runs can be resumed from another process (§7, storage).
   limit): run limit **$1.00**, confirm above **$0.25**, daily limit **$5.00** (the
   local calendar day, across all runs). The effective values and today's spend are
   printed at the start of every run.
-- **Prices:** prices come only from `config/pricing.yaml`. If an `api` model has no
-  entry, the run is **refused**. There is no override. The report shows the
+- **Prices:** prices come only from the model registry `config/models.yaml` (ADR 0006),
+  and only from verified entries (`source_url` and `last_verified` set). If an `api`
+  model has no verified price, the run is **refused**. There is no override. The report shows the
   `last_verified` date of each price used and warns about stale entries.
 - **Before the run:** an estimate range is computed from the call plan, the price
   table, and token heuristics or vendor token counting. The run is refused if the
@@ -175,17 +180,40 @@ Paused runs can be resumed from another process (§7, storage).
 - **CLI backend:** per-call cost is unknowable. Any `cli` member requires an explicit
   `allow_unknown_cost: true`. The ledger records the **number of CLI calls and their
   wall-clock duration**, and the report lists them separately from priced spend.
-- **Reasoning effort:** `low | medium | high | default` per member. Each provider maps
-  these to its own controls. Peer review and the agreement judge default to `low`.
+- **Reasoning tokens** are part of the estimate: visible output × a configurable
+  multiplier per level (`cost.reasoning_multipliers`, provisional). They are
+  calibrated from ledger observations once enough calls are recorded.
+
+### 5.1 Models and reasoning (ADR 0006)
+
+- Members name a model by **alias** (`fast` / `balanced` / `best` of their provider)
+  or by concrete id. `reasoning` is `low | medium | high | default`. An optional
+  `native` dict passes vendor parameters through verbatim.
+- **Roles** set defaults: `answerer` default, `reviewer` low, `agreement_judge` low,
+  `chairman` default. Reviewer and judge calls always use the role default.
+- The **ModelResolver** resolves aliases, checks that the backend is supported, and
+  maps the level to the registry's native value. If a level cannot be mapped, the
+  normal mode downgrades it to `default` with a warning, and the **strict** mode
+  (`resolution: strict` / `--strict`) fails.
+- **Unregistered models** may be used, but only with `default` reasoning. For `api`
+  they also lack a verified price, so such runs are refused (§5).
+- Every call's **native parameters actually sent** are recorded in the run metadata.
+- `llm-crossjury models list` shows the registry. `llm-crossjury models refresh` diffs
+  it against the vendors' model-list endpoints (phase 1A).
 
 ## 6. Anonymity
 
 - Labels are shuffled per run. The label→member map lives only in the run state and
   is never put in a prompt.
 - Every member prompt instructs the model not to reveal its identity, vendor or model.
-- Stage-1 output (and Document Review edit reasons) is then **regex-scrubbed** for
-  self-identifying phrases ("As Claude…", "trained by OpenAI…"). Matches are
-  replaced with `[identity removed]`, and the count is recorded in the run record.
+- Member output (stage-1 answers and Document Review edit reasons) is then scrubbed
+  **language-independently**. There are no sentence patterns: the model and vendor
+  names Claude, ChatGPT, GPT, Gemini, Grok, Anthropic, OpenAI, Google and xAI (with
+  hyphenated version suffixes) are replaced with `[model]`, matched case-sensitively.
+  The count is recorded in the run record.
+- If the **original task input** (task text, or the document in Document Review)
+  contains any of these names, the scrub is **disabled for that run**, because the task
+  is then legitimately about them.
 - The order of targets in review prompts is shuffled per reviewer.
 
 ## 7. Storage and privacy
@@ -218,7 +246,7 @@ Paused runs can be resumed from another process (§7, storage).
 - Hosted service, accounts, telemetry.
 - Extracting, proxying or reusing CLI credentials in any form.
 - Guaranteeing perfect anonymity (stylistic fingerprints are out of scope).
-- Bundled price data (users maintain `pricing.yaml`).
+- Bundled model facts or price data (users maintain `config/models.yaml`).
 - Automatic skipping of pipeline stages based on model output.
 
 ## 10. Open Questions
@@ -229,13 +257,13 @@ Paused runs can be resumed from another process (§7, storage).
    name. The import name is `llm_crossjury`, because Python identifiers cannot contain `-`.
 2. **Chair as member.** *Decided:* allowed by default. The chair stays blind to which
    answer is its own. Configurable with `chairman_excluded` (§3.2).
-3. **Default topology.** *Decided:* `full` for ≤ 3 answers, `ring` (k = 1) for ≥ 4 (§3.2).
+3. **Default topology.** *Decided:* `full` for ≤ 3 answers, `ring` for ≥ 4 (k: see 18) (§3.2).
 4. **Early stop.** *Decided:* no automatic skipping. Checkpoint A shows the agreement
    ratio (cheap judge over claims) and the estimated saving, and the user decides.
    The threshold is configurable; its default is set in the evaluation phase.
 5. **`--auto`.** *Decided:* explicit opt-in only. Auto decisions are flagged in all
    outputs (§4).
-6. **Anonymity.** *Decided:* a prompt instruction plus regex scrubbing (§6).
+6. **Anonymity.** *Decided:* a prompt instruction plus name scrubbing (§6; see 19).
 7. **Budget.** *Decided:* built-in defaults of $1.00 per run, confirmation above
    $0.25, and $5.00 per day, printed at run start. A missing price entry refuses the
    run (§5).
@@ -258,22 +286,26 @@ Paused runs can be resumed from another process (§7, storage).
     override. The paper preset supports non-English papers. Internal prompts are in
     English (§3.4).
 
+16. **Agreement threshold default.** *Decided:* deferred to the evaluation phase, together
+    with the default judge model.
+17. **`max_document_tokens` default.** *Decided:* 50,000 estimated tokens.
+18. **Ranking under `ring`.** *Decided:* with ≥ 4 members the default is `ring` with
+    k = 2. k = 1 stays available as the "issues only, no ranking" mode, which skips
+    Borda aggregation (§3.2).
+19. **Scrubbing beyond English.** *Decided:* no language-specific sentence patterns.
+    Model and vendor names are replaced with `[model]`, and scrubbing is disabled for
+    any run whose task input contains those names (§6).
+20. **Daily limit and time zones.** *Decided:* the local calendar day.
+21. **`--auto` and checkpoint A.** *Decided:* `--auto` never skips peer review.
+
 ### Open
 
-16. **Agreement threshold default.** To be set in the evaluation phase, together with
-    the choice of default judge model.
-17. **`max_document_tokens` default.** It is provisionally 50,000 estimated tokens. Is
-    that the right default, given the smallest context window among typical members
-    and the cost of a cached prefix?
-18. **Ranking signal under `ring` with k = 1.** With k = 1 each reviewer sees exactly
-    one target, so its ranking carries no information, and the Borda aggregate is
-    empty for councils of 4 or more. Options: (a) default k = 2 for ≥ 4 answers; (b)
-    accept that the ranking is empty and rely on issue severity counts; (c) add one
-    `single_judge` ranking call. Recommendation: (a).
-19. **Regex scrubbing beyond English.** The initial patterns are English-only. Should
-    v1 ship patterns for other languages, given that output follows the input language?
-20. **Daily limit and time zones.** "Day" means the local calendar day of the machine.
-    Is that acceptable, or should it be a rolling 24 hours?
-21. **`--auto` and checkpoint A.** Under `--auto`, should review ever be skipped
-    automatically when the agreement ratio is above the threshold? The current
-    decision is never, which is consistent with decision 4.
+22. **Reasoning multipliers.** The provisional defaults (`low` 0.5, `medium` 1.0,
+    `high` 2.0, `default` 1.0 × visible output) are placeholders until ledger
+    calibration. Should they be set per model in the registry instead of globally?
+23. **Unregistered `api` models.** They are allowed with `default` reasoning (ADR 0006),
+    but they have no verified price, so the cost rules refuse them. Is "usable only on
+    the `cli` backend" the intended outcome, or should a verified price be allowed in
+    the run config for unregistered models?
+24. **`models refresh` output.** Should refresh only print a diff (current design), or
+    also write a draft entry file for the user to review?

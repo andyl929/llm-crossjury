@@ -11,15 +11,18 @@ Read this file, `docs/SPEC.md` and `docs/ARCHITECTURE.md` before you change anyt
 3. **Never print secrets.** No output (CLI, logs, exceptions, test output, reports,
    commit messages) may contain an API key or any part of one: no prefix, suffix or
    length. Report presence as "set"/"not set" only.
-4. **No hard-coded prices.** Prices come only from `config/pricing.yaml`, and every
+4. **No hard-coded model facts or prices.** Model ids, reasoning parameters, CLI
+   flags, limits and prices come only from `config/models.yaml` (ADR 0006), and every
    entry needs `source_url` and `last_verified`. Never fill a price from memory.
 5. **Contract files are frozen**: `src/llm_crossjury/core/schemas/**` and
-   `src/llm_crossjury/core/providers/base.py`. Do not modify them. If a contract is wrong
+   `src/llm_crossjury/core/providers/base.py` and `src/llm_crossjury/core/registry/schema.py`.
+   Do not modify them. If a contract is wrong
    or insufficient, add an entry to `docs/contract-issues.md`, work around it outside
    the contract if you can, and report it under *Decisions needed*.
 6. **No global installs** (pip/npm/brew/winget/choco/system packages, global uv
    tools) without the maintainer's explicit consent. Project dependencies go through
-   `uv add` only.
+   `uv add` only. Exception: uv-managed Python versions (`uv python install`, or the
+   automatic download by `uv run --python X`) may be used for local testing.
 7. **Never `git push`**, and never create remotes, tags or releases. Never rewrite
    published history.
 8. **English only** for code, comments, docs, prompts and commit messages.
@@ -40,6 +43,9 @@ Python 3.11 and 3.12, plus a schema-drift check. Pin every action to a full comm
 SHA, and verify the version against the action's official release page first.
 
 ## 3. Coding standards
+
+- ADRs: small clarifications may be made in place with an `Amended:` date. Overturning
+  a decision requires a new ADR that supersedes the old one (see docs/adr/README.md).
 
 - Python ≥ 3.11 (`.python-version` pins 3.12 for development). `from __future__ import annotations`.
 - Full type hints. `mypy --strict` clean. No `Any` in public signatures unless the

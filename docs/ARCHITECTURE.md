@@ -17,6 +17,7 @@ Status: draft · Covers the skeleton as committed. Things marked *(planned)* are
 │                 topology, agreement, ranking (Borda),         │
 │                 RunContext, checkpoint store                  │
 │  schemas/       Pydantic structured-output models (CONTRACT)  │
+│  registry/      model registry schema (CONTRACT), resolver    │
 │  cost/          PricingTable, CostEstimator, Ledger           │
 │  providers/     base.py (CONTRACT), api/, cli/, mock          │
 │  anonymize.py   identity scrubbing                            │
@@ -39,21 +40,24 @@ from `llm_crossjury`, except that `schemas.synthesis` imports `schemas.edits`.
 | `core/providers/cli/` | One adapter per vendor CLI (`claude`, `codex`, `gemini`, `grok`), plus `_subprocess.py` with the hardened runner (ADR 0002) |
 | `core/providers/mock.py` | Deterministic provider for tests |
 | `core/schemas/` | `Stage1Answer`, `AgreementJudgment`, `PeerReview`, `EditList`, `Synthesis`, `DocumentSynthesis`, and `export.py` (canonical strict JSON Schema). **Contract** |
-| `core/cost/` | `PricingTable` (from YAML), `CostEstimator` → `CostEstimate`, `Ledger` (SQLite; per-run and daily limits; CLI call counts and durations), `compute_cost` |
+| `core/registry/` | `schema.py` (**contract**: `ModelEntry`, `ReasoningControl`, `CliFlags`, `Pricing`, aliases), `resolver.py` (`ModelRegistry`, `ModelResolver`, `ResolvedModel`, `refresh_from_vendors`) (ADR 0006) |
+| `core/cost/` | `PricingTable` (over the registry; verified entries only), `CostEstimator` → `CostEstimate` (with resolutions and reasoning tokens), `Ledger` (SQLite; per-run and daily limits; CLI call counts and durations; reasoning calibration), `compute_cost` |
 | `core/orchestrator/` | `Pipeline` (run/resume/skip-review), `Stage`, `CheckpointStage`, `PipelineHook` (`BudgetGuard`), `ReviewTopology` + `assign_reviews`, `agreement` (judge stage + ratio), `ranking` (Borda), `RunContext`, `CheckpointStore` |
 | `core/modes/` | Concrete stages and pipeline builders per mode. Document loading, chunking, merging and presets |
-| `core/anonymize.py` | Regex scrubbing of self-identifying phrases |
-| `cli/app.py` | `llm-crossjury run / resume / cost estimate / cost report / providers check` |
+| `core/anonymize.py` | Replaces model/vendor names with `[model]`; disabled per run if the input mentions them |
+| `core/config_export.py` | JSON Schemas for `models.yaml` and the run config (`schemas/config/`) |
+| `cli/app.py` | `llm-crossjury run / resume / cost estimate / cost report / providers check / models list / models refresh` |
 | `prompts/` | Versioned prompt templates (`<stage>.v<N>.md`), always in English |
 | `schemas/` | Generated `*.schema.json`. A test and CI fail when they drift from the models |
-| `config/` | `pricing.yaml` (empty, user-maintained) and `llm-crossjury.example.yaml` |
+| `config/` | `models.yaml` (registry; fictitious examples only, user-maintained) and `llm-crossjury.example.yaml` |
 | `scripts/` | Manual, possibly billed scripts. Never collected by pytest |
 | `.github/workflows/ci.yml` | ruff, mypy, pytest and the schema-drift check on Ubuntu + Windows × Python 3.11 + 3.12 |
 
 ## 3. Data flow (Council mode)
 
 ```
-task ─► Stage 0: print budget, plan, CostEstimate ─► [refuse | confirm] ─►
+task ─► Stage 0: print budget, resolve models (aliases, backends, native reasoning),
+         plan, CostEstimate (incl. reasoning tokens) ─► [refuse | confirm] ─►
   Stage 1 answer (N parallel calls, shared stable prefix) ─► scrub ─► {label: Stage1Answer}
   ─► Stage 1b agreement (cheap judge, effort low) ─► AgreementJudgment ─► ratio (code)
   ─► Checkpoint A (agreement ratio + review cost) ─► PruneDecision(drop, skip_review)
@@ -87,10 +91,13 @@ chair's output is a `DocumentSynthesis`.
   to the vendor, applying a lossless dialect transform where needed. If it does not,
   it appends format instructions. In every case the stage validates the returned text
   with `Model.model_validate_json` and retries once on failure *(planned)*.
-- **Reasoning effort.** `CompletionRequest.reasoning_effort` is one of
-  `low | medium | high | default`. Each adapter maps it to vendor parameters. If a
-  model has no such control (`Capabilities.reasoning_effort = false`), the value is
-  ignored, and that is recorded.
+- **Model resolution (ADR 0006).** Before any call, `ModelResolver` turns each
+  (member, role) into a `ResolvedModel`: alias → `model_id`, a backend check, the
+  reasoning level → a native value from the registry (in normal mode, unsupported
+  levels are downgraded to `default` with a warning; in strict mode they fail), the
+  `native` passthrough merged last, and CLI argv tokens from `cli_flags`. Adapters
+  receive `CompletionRequest.native_params` and send it verbatim; they never map
+  reasoning themselves. `CompletionResult.native_params_used` is recorded per call.
 - **Capabilities** are declared per model, and the orchestrator checks them before
   planning batches, caching, temperature or effort settings.
 - **Usage** maps vendor counters onto five fields. `None` means unknown.
@@ -109,9 +116,10 @@ chair's output is a `DocumentSynthesis`.
   refuses a call that could overshoot the run limit or the daily limit. After each
   stage, `BudgetGuard` acts as a backstop.
 - **Topology.** `resolve_topology` picks `full` for ≤ 3 reviewed answers and
-  `ring` (k = 1) for ≥ 4, unless one is configured.
+  `ring` with k = 2 for ≥ 4, unless one is configured. `ring` with k = 1 is the
+  "issues only" mode.
 - **Ranking.** `borda_aggregate` uses a normalized Borda count: each review
-  contributes on a 0..1 scale, and reviews that ranked only one target contribute nothing.
+  contributes on a 0..1 scale. It is not called in the "issues only" mode.
 - **`--auto`** sets `ctx.auto`. At checkpoints the CLI then produces decisions with
   `decided_by = auto` (keep all, no skip, defer every dispute to the chair) and
   resumes immediately.
@@ -151,7 +159,8 @@ resolver refuses a directory inside a git working tree.
   ledger.sqlite3              # cost ledger: usage, costs, durations; never text
   runs/<run_id>/run.json      # config snapshot (no secrets), stage status, labels map,
                               # prompt ids/versions, content hashes, cost summary,
-                              # decided_by flags, scrub counts
+                              # decided_by flags, scrub counts, every call's
+                              # resolved model and native_params_used
   runs/<run_id>/content/      # prompts, responses, artifacts: ONLY if store_content
   checkpoints/<run_id>/       # unfinished-run snapshot, including content (temporary)
 ```
@@ -175,9 +184,12 @@ No mode ever stores API keys, OAuth tokens, cookies, or CLI credential paths.
 ## 7. Configuration and secrets
 
 - `llm-crossjury.yaml` (from `config/llm-crossjury.example.yaml`) defines members,
-  chair, `chairman_excluded`, review, agreement, budget, cost, document,
-  `output_language`, `pricing_path`, `store_content`, `checkpoint_retention_days` and
-  `data_dir`. It contains no secrets. A test checks that the example validates.
+  chair, `chairman_excluded`, roles, review, agreement, budget, cost, document,
+  anonymize, resolution, `output_language`, `models_path`, `store_content`,
+  `checkpoint_retention_days` and `data_dir`. It contains no secrets and no model
+  facts. A test checks that the example validates.
+- `config/models.yaml` is the model registry (ADR 0006). The repository ships only
+  fictitious example entries, and tests enforce that.
 - Budget defaults are built in ($1.00 per run, $0.25 confirmation threshold, $5.00
   per day). The effective values are printed at the start of every run.
 - API keys come only from environment variables, which may be loaded from `.env`.
@@ -202,7 +214,7 @@ No mode ever stores API keys, OAuth tokens, cookies, or CLI credential paths.
 
 ## 9. Contract files
 
-`core/schemas/**` and `core/providers/base.py` are contracts shared by every adapter,
+`core/schemas/**`, `core/providers/base.py` and `core/registry/schema.py` are contracts shared by every adapter,
 stage and future UI. They change only with the maintainer's approval. Problems go to
 `docs/contract-issues.md` (see AGENTS.md). The changes approved before phase 1 are
 listed in that file.

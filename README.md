@@ -36,10 +36,13 @@ llm-crossjury cost estimate --mode document-review --input paper.tex
 
 Every run is estimated before it starts and recorded in a ledger while it runs.
 The built-in limits are $1.00 per run and $5.00 per day, and anything over $0.25
-needs your confirmation. These limits are printed at the start of every run. Prices
-come **only** from [`config/pricing.yaml`](config/pricing.yaml), where every entry
-carries a `source_url` and a `last_verified` date. If a model has no entry, the run
-is refused.
+needs your confirmation. These limits are printed at the start of every run. Model
+facts and prices come **only** from the model registry
+[`config/models.yaml`](config/models.yaml), where every entry carries a `source_url`
+and a `last_verified` date. If an `api` model has no verified price, the run is
+refused. Members can name models by alias (`fast` / `balanced` / `best`), and
+`llm-crossjury cost estimate` shows exactly which model and reasoning parameters
+will be used.
 
 ## Development
 
