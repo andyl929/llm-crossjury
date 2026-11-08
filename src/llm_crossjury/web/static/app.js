@@ -424,6 +424,39 @@
       panel.classList.remove("drop-target");
       uploadFiles(e.dataTransfer.files);
     });
+    // Paste files (e.g. a screenshot) straight into the task as attachments, like the
+    // vendors' chat apps. Plain text still pastes into the textarea as usual.
+    panel.addEventListener("paste", (e) => {
+      const files = pastedFiles(e.clipboardData);
+      if (!files.length) return;
+      const types = Array.from((e.clipboardData && e.clipboardData.types) || []);
+      if (!types.includes("text/plain")) e.preventDefault();
+      uploadFiles(files);
+    });
+  }
+
+  let pasteCounter = 0;
+
+  function pastedFiles(clipboard) {
+    if (!clipboard) return [];
+    const out = [];
+    for (const item of Array.from(clipboard.items || [])) {
+      if (item.kind !== "file") continue;
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      out.push(renamePasted(blob));
+    }
+    return out;
+  }
+
+  function renamePasted(blob) {
+    // Clipboard images usually arrive as "image.png"; give each paste a distinct name.
+    const generic = !blob.name || /^image\.(png|jpe?g|gif|webp)$/i.test(blob.name);
+    if (!generic) return blob;
+    const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+    pasteCounter += 1;
+    return new File([blob], "pasted-" + stamp + "-" + pasteCounter + "." + ext, { type: blob.type });
   }
 
   // Delivery badges: how a member receives (or would receive) each file.
