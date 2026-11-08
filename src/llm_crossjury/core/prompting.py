@@ -9,6 +9,7 @@ The stable prefix becomes one system message unless it is empty.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -35,10 +36,13 @@ class Template:
     def render_text(self, section: str, values: dict[str, str]) -> str:
         """Substitute ``values`` into ``section`` (``"prefix"`` or ``"suffix"``)."""
         text = self.stable_prefix if section == "prefix" else self.variable_suffix
-        for name in self.variables:
-            if name in values:
-                text = text.replace("{" + name + "}", values[name])
-        return text
+        names = [name for name in self.variables if name in values]
+        if not names:
+            return text
+        # Single pass: a substituted value that itself contains "{other}" is never
+        # expanded again (task text is user input).
+        pattern = re.compile("|".join(re.escape("{" + name + "}") for name in names))
+        return pattern.sub(lambda m: values[m.group(0)[1:-1]], text)
 
     def render(
         self,

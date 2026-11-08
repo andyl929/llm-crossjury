@@ -126,6 +126,18 @@ def test_template_rendering(tmp_path: Path) -> None:
         template.render(suffix_values={"nope": "x"})
 
 
+def test_template_substitution_is_single_pass(tmp_path: Path) -> None:
+    (tmp_path / "g").mkdir()
+    (tmp_path / "g" / "t.v1.md").write_text(
+        "---\nid: g/t.v1\nvariables: [task, extra]\n---\n\n## stable_prefix\n\n"
+        "## variable_suffix\n\n{task} | {extra}\n",
+        encoding="utf-8",
+    )
+    template = load_template("g/t.v1", tmp_path)
+    prompt = template.render(suffix_values={"task": "literal {extra}", "extra": "E"})
+    assert prompt.variable_suffix[0].content == "literal {extra} | E"
+
+
 def test_scrub_replaces_names_and_counts() -> None:
     result = scrub("As Claude (by Anthropic) and gpt-4o say, claudette is fine.")
     assert result.text == f"As {REDACTION} (by {REDACTION}) and {REDACTION} say, claudette is fine."
