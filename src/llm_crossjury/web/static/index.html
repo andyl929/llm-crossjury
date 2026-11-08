@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llm-crossjury Compare</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">llm-crossjury <span class="brand-mode">Compare</span></div>
+    <div id="budget-summary" class="budget-summary" aria-live="polite"></div>
+  </header>
+
+  <main class="page">
+    <section class="panel">
+      <label for="task" class="section-label">Task</label>
+      <textarea id="task" rows="6" spellcheck="true"
+        placeholder="Ask a question or describe a task. Each selected model answers it independently."></textarea>
+    </section>
+
+    <section class="panel">
+      <h2 class="section-label">Models</h2>
+      <div id="providers" class="providers">
+        <p class="muted">Loading providers...</p>
+      </div>
+    </section>
+
+    <section class="panel actions-panel">
+      <div class="actions">
+        <button id="estimate-btn" type="button" class="btn">Estimate cost</button>
+        <button id="run-btn" type="button" class="btn btn-primary" disabled>Run</button>
+        <span id="action-hint" class="muted">Pick at least one model, then estimate the cost.</span>
+      </div>
+      <div id="estimate" class="estimate" hidden></div>
+    </section>
+
+    <div id="message" class="message" role="alert" hidden></div>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="results-head">
+        <h2>Results</h2>
+        <div id="run-total" class="run-total"></div>
+      </div>
+      <div id="results" class="results"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

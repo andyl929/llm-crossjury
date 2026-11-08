@@ -6,13 +6,18 @@ figures always show their currency and whether any part is unknown.
 
 from __future__ import annotations
 
+import threading
+import webbrowser
 from pathlib import Path
 from typing import Annotated
 
 import typer
+import uvicorn
 
+from llm_crossjury.core.compare_service import build_default_deps
 from llm_crossjury.core.modes import Mode
 from llm_crossjury.core.providers.base import Backend
+from llm_crossjury.web import LOOPBACK_HOSTS, create_app
 
 app = typer.Typer(
     name="llm-crossjury",
@@ -170,6 +175,46 @@ def models_refresh(
     """Compare the registry with each vendor's model-list endpoint and print the
     differences. Never edits config/models.yaml and spends no tokens."""
     raise NotImplementedError
+
+
+_WILDCARD_HOSTS = ("0.0.0.0", "::")  # noqa: S104 - compared against, never bound here
+_BROWSER_DELAY_S = 1.0
+
+
+@app.command()
+def ui(
+    host: Annotated[
+        str, typer.Option("--host", help="Interface to listen on. Keep the default (localhost).")
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="Port to listen on.")] = 8765,
+    no_browser: Annotated[
+        bool, typer.Option("--no-browser", help="Do not open the browser.")
+    ] = False,
+) -> None:
+    """Start the local compare web UI and open it in the browser.
+
+    Loads API keys from ./.env (never printed) and the model registry from config/.
+    """
+    deps = build_default_deps(Path.cwd())
+    if host in _WILDCARD_HOSTS:
+        allowed: tuple[str, ...] = ("*",)
+    else:
+        allowed = (*LOOPBACK_HOSTS, host)
+    if host not in LOOPBACK_HOSTS:
+        typer.echo(
+            f"Warning: listening on {host}, not localhost. Anyone who can reach this "
+            "address can spend your API budget.",
+            err=True,
+        )
+    web_app = create_app(lambda: deps, allowed_hosts=allowed)
+    shown = "127.0.0.1" if host in _WILDCARD_HOSTS else host
+    url = f"http://[{shown}]:{port}/" if ":" in shown else f"http://{shown}:{port}/"
+    typer.echo(f"llm-crossjury UI: {url} (Ctrl+C to stop)")
+    if not no_browser:
+        timer = threading.Timer(_BROWSER_DELAY_S, webbrowser.open, args=(url,))
+        timer.daemon = True
+        timer.start()
+    uvicorn.run(web_app, host=host, port=port, log_level="warning")
 
 
 def main() -> None:
