@@ -1,25 +1,30 @@
 """Shared scaffolding for ``api`` adapters.
 
 Everything here is vendor-neutral: API-key handling, registry-backed capabilities,
-the structured-output fallback, prompt validation, deep merging of
-``native_params`` and error sanitizing. Vendor SDKs are never imported here, so this
+the structured-output fallback, prompt validation, attachment handling (ADR 0007),
+deep merging of ``native_params`` and error sanitizing. Vendor SDKs are never imported here, so this
 module (and ``check()``) works without them.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from importlib import metadata
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from llm_crossjury.core.providers.base import (
+    Attachment,
+    AttachmentKind,
     Backend,
     BatchHandle,
     BatchState,
     Capabilities,
+    CapabilityNotSupportedError,
     CompletionRequest,
     CompletionResult,
     Message,
@@ -32,6 +37,9 @@ from llm_crossjury.core.registry.schema import ModelEntry, ReasoningControlType
 
 _REDACTED = "[REDACTED]"
 _MAX_ERROR_DETAIL = 300
+# Runs of base64 alphabet this long are treated as possibly echoed attachment data.
+_MIN_SCRUB_LINE = 8
+_BASE64_RUN = re.compile(r"[A-Za-z0-9+/=_-]{64,}")
 
 
 class ModelLookup(Protocol):
@@ -54,7 +62,9 @@ def capabilities_from_entry(entry: ModelEntry | None, *, vendor_caching: bool) -
     Returns:
         ``structured_output`` iff the entry says ``True``; ``reasoning`` iff the
         control type is ``levels`` or ``budget``; ``temperature`` True; ``batch``
-        False (MVP). Without an entry everything is False except ``temperature``.
+        False (MVP); ``input_modalities`` copied from the entry (``None`` = unverified
+        = empty, i.e. text only; ADR 0007). Without an entry everything is False
+        (or empty) except ``temperature``.
     """
     if entry is None:
         return Capabilities(
@@ -71,6 +81,7 @@ def capabilities_from_entry(entry: ModelEntry | None, *, vendor_caching: bool) -
         temperature=True,
         reasoning=entry.reasoning_control.type
         in (ReasoningControlType.LEVELS, ReasoningControlType.BUDGET),
+        input_modalities=frozenset(entry.input_modalities or ()),
     )
 
 
@@ -114,6 +125,87 @@ def validate_prompt(stable_prefix: Sequence[Message], variable_suffix: Sequence[
         raise ProviderError("system messages may appear only in prompt.stable_prefix")
 
 
+def validate_attachment_roles(messages: Iterable[Message]) -> None:
+    """Reject attachments on anything but user messages (ADR 0007).
+
+    Raises:
+        ProviderError: if a system or assistant message carries attachments. The
+            message names only the role, never file names or content.
+    """
+    for message in messages:
+        if message.attachments and message.role is not Role.USER:
+            raise ProviderError(
+                f"attachments are allowed on user messages only, not on {message.role.value}"
+            )
+
+
+def fallback_text_block(attachment: Attachment) -> str:
+    r"""Render ``attachment.fallback_text`` as the canonical delimited text block.
+
+    Format (ADR 0007, item 7)::
+
+        <attachment name="{filename}" type="{media_type}" sha256="{sha256[:12]}">
+        {fallback_text}
+        </attachment>
+
+    Every ``</attachment>`` inside the text is escaped as ``<\/attachment>`` so the
+    content cannot close the block.
+
+    Raises:
+        ValueError: if the attachment has no ``fallback_text``.
+    """
+    if attachment.fallback_text is None:
+        raise ValueError("attachment has no fallback_text")
+    body = attachment.fallback_text.replace("</attachment>", "<\\/attachment>")
+    return (
+        f'<attachment name="{attachment.filename}" type="{attachment.media_type}" '
+        f'sha256="{attachment.sha256[:12]}">\n{body}\n</attachment>'
+    )
+
+
+AttachmentMode = Literal["native", "text"]
+"""How an adapter sends one attachment: as a native file part or as fallback text."""
+
+
+def attachment_mode(
+    attachment: Attachment,
+    input_modalities: frozenset[AttachmentKind],
+    *,
+    provider: str,
+    model: str,
+) -> AttachmentMode:
+    """Decide how one attachment is sent (ADR 0007, item 2).
+
+    Returns:
+        ``"native"`` when ``attachment.kind`` is in ``input_modalities`` and is not
+        ``DOCUMENT`` (never native in v1); otherwise ``"text"`` when
+        ``fallback_text`` is set.
+
+    Raises:
+        CapabilityNotSupportedError: neither applies (typically an image for a model
+            without native image input). Names the file and the model only.
+    """
+    if attachment.kind is not AttachmentKind.DOCUMENT and attachment.kind in input_modalities:
+        return "native"
+    if attachment.fallback_text is not None:
+        return "text"
+    raise CapabilityNotSupportedError(
+        f"{provider} model {model!r} does not accept {attachment.kind.value} attachments "
+        f"natively and {attachment.filename!r} has no text fallback"
+    )
+
+
+def attachment_base64(attachment: Attachment) -> str:
+    """Standard base64 (RFC 4648, with padding) of ``attachment.data``."""
+    return base64.b64encode(attachment.data).decode("ascii")
+
+
+def iter_attachments(messages: Iterable[Message]) -> Iterator[Attachment]:
+    """Yield every attachment of ``messages`` in order."""
+    for message in messages:
+        yield from message.attachments
+
+
 def suffix_with_format_instructions(
     variable_suffix: Sequence[Message], schema: Mapping[str, Any]
 ) -> tuple[Message, ...]:
@@ -129,7 +221,9 @@ def suffix_with_format_instructions(
         message = messages[index]
         if message.role is Role.USER:
             messages[index] = Message(
-                role=Role.USER, content=f"{message.content}\n\n{instructions}"
+                role=Role.USER,
+                content=f"{message.content}\n\n{instructions}",
+                attachments=message.attachments,
             )
             return tuple(messages)
     messages.append(Message(role=Role.USER, content=instructions))
@@ -149,13 +243,24 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def sanitize_error(vendor: str, exc: BaseException, secret: str | None) -> ProviderError:
+def sanitize_error(
+    vendor: str,
+    exc: BaseException,
+    secret: str | None,
+    *,
+    attachments: Sequence[Attachment] = (),
+) -> ProviderError:
     """Wrap a vendor/SDK exception in a :class:`ProviderError` without secrets.
 
     The message carries the vendor name, the exception type, the HTTP status (if the
     SDK exposes one as ``status_code`` or ``code``) and a truncated description with
     every occurrence of ``secret`` replaced by ``[REDACTED]``. Callers raise the
     result ``from None`` so the original exception (and its repr) is not chained.
+
+    When ``attachments`` are given, the description is also scrubbed of attachment
+    content (ADR 0007): each attachment's base64 encoding, its ``fallback_text`` and
+    that text's first line are replaced by ``[REDACTED]``, and so is any run of 64 or
+    more base64-alphabet characters (partially echoed file data).
     """
     status = getattr(exc, "status_code", None)
     if not isinstance(status, int):
@@ -166,12 +271,30 @@ def sanitize_error(vendor: str, exc: BaseException, secret: str | None) -> Provi
     detail = str(exc)
     if secret:
         detail = detail.replace(secret, _REDACTED)
+    if attachments:
+        detail = _scrub_attachments(detail, attachments)
     detail = " ".join(detail.split())
     if len(detail) > _MAX_ERROR_DETAIL:
         detail = detail[:_MAX_ERROR_DETAIL] + "..."
     if detail:
         message += f": {detail}"
     return ProviderError(message)
+
+
+def _scrub_attachments(detail: str, attachments: Sequence[Attachment]) -> str:
+    needles: set[str] = set()
+    for attachment in attachments:
+        if attachment.data:
+            needles.add(attachment_base64(attachment))
+        text = attachment.fallback_text
+        if text and text.strip():
+            needles.add(text)
+            first_line = text.strip().splitlines()[0].strip()
+            if len(first_line) >= _MIN_SCRUB_LINE:
+                needles.add(first_line)
+    for needle in sorted(needles, key=len, reverse=True):
+        detail = detail.replace(needle, _REDACTED)
+    return _BASE64_RUN.sub(_REDACTED, detail)
 
 
 class ApiProviderBase:
