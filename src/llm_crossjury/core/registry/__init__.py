@@ -4,10 +4,13 @@ from llm_crossjury.core.registry.resolver import (
     ModelRegistry,
     ModelResolver,
     RegistryDiff,
+    RegistryError,
     ResolutionError,
     ResolutionMode,
     ResolvedModel,
     Role,
+    deep_merge,
+    resolve_models_path,
 )
 from llm_crossjury.core.registry.schema import (
     CliFlags,
@@ -32,8 +35,11 @@ __all__ = [
     "ReasoningControl",
     "ReasoningControlType",
     "RegistryDiff",
+    "RegistryError",
     "ResolutionError",
     "ResolutionMode",
     "ResolvedModel",
     "Role",
+    "deep_merge",
+    "resolve_models_path",
 ]
