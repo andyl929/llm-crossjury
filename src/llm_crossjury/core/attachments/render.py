@@ -25,6 +25,18 @@ _ESCAPED_CLOSE_TAG = "<\\/attachment>"
 _SHA_PREFIX_CHARS = 12
 
 
+def _attr(value: str) -> str:
+    """Escape a value for the tag's attribute so it cannot break the delimiter."""
+    return (
+        value.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )
+
+
 def fallback_block(att: Attachment) -> str:
     """Return the canonical inline text form of an attachment.
 
@@ -47,7 +59,7 @@ def fallback_block(att: Attachment) -> str:
         raise ValueError(f"attachment {att.filename!r} has no text form")
     body = att.fallback_text.replace(_CLOSE_TAG, _ESCAPED_CLOSE_TAG)
     return (
-        f'<attachment name="{att.filename}" type="{att.media_type}" '
+        f'<attachment name="{_attr(att.filename)}" type="{_attr(att.media_type)}" '
         f'sha256="{att.sha256[:_SHA_PREFIX_CHARS]}">\n{body}\n{_CLOSE_TAG}'
     )
 

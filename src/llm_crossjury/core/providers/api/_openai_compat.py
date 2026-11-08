@@ -163,11 +163,13 @@ def fallback_block(attachment: Attachment) -> str:
     Returns:
         The block, from the opening tag to the closing tag.
     """
-    text = (attachment.fallback_text or "").replace("</attachment>", "<\\/attachment>")
-    return (
-        f'<attachment name="{attachment.filename}" type="{attachment.media_type}" '
-        f'sha256="{attachment.sha256[:12]}">\n{text}\n</attachment>'
+    from llm_crossjury.core.attachments.render import (  # noqa: PLC0415
+        fallback_block as canonical_fallback_block,
     )
+
+    if attachment.fallback_text is None:
+        raise ValueError("attachment has no fallback_text")
+    return canonical_fallback_block(attachment)
 
 
 def _data_url(media_type: str, data: bytes) -> str:

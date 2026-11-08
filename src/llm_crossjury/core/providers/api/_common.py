@@ -154,13 +154,11 @@ def fallback_text_block(attachment: Attachment) -> str:
     Raises:
         ValueError: if the attachment has no ``fallback_text``.
     """
+    from llm_crossjury.core.attachments.render import fallback_block  # noqa: PLC0415
+
     if attachment.fallback_text is None:
         raise ValueError("attachment has no fallback_text")
-    body = attachment.fallback_text.replace("</attachment>", "<\\/attachment>")
-    return (
-        f'<attachment name="{attachment.filename}" type="{attachment.media_type}" '
-        f'sha256="{attachment.sha256[:12]}">\n{body}\n</attachment>'
-    )
+    return fallback_block(attachment)
 
 
 AttachmentMode = Literal["native", "text"]
