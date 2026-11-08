@@ -59,8 +59,17 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from llm_crossjury.core.anonymize import scrub, scrub_enabled_for
+from llm_crossjury.core.attachments.build import AttachmentMeta, BuiltAttachment
+from llm_crossjury.core.attachments.prompt import (
+    attachment_tokens,
+    inline_attachments,
+    prompt_attachment_tokens,
+    receipts,
+    refusal_message,
+)
 from llm_crossjury.core.compare_service import (
     DEFAULT_TIMEOUT_S,
+    MAX_ATTACHMENTS,
     BudgetRefusedError,
     BudgetStatus,
     CompareDeps,
@@ -72,6 +81,7 @@ from llm_crossjury.core.compare_service import (
     execute_budgeted_call,
     is_cli_usable,
     key_is_set,
+    load_attachments,
     new_run_id,
     provider_names,
     require_consent,
@@ -83,6 +93,7 @@ from llm_crossjury.core.providers.base import (
     Backend,
     CompletionRequest,
     CompletionResult,
+    Prompt,
     ProviderError,
     ProviderUnavailableError,
     ReasoningEffort,
@@ -175,6 +186,8 @@ class SynthesisRequest(_Frozen):
     """Comparison criteria or a follow-up query for the reviewers and the chair."""
     allow_unknown_cost: bool = False
     """Consent to ``cli`` calls of unknown cost (required when any call uses ``cli``)."""
+    attachment_ids: tuple[str, ...] = Field(default=(), max_length=MAX_ATTACHMENTS)
+    """The step-1 attachments (ADR 0007). Only the chair receives them."""
 
 
 class FinishRequest(SynthesisRequest):
@@ -324,6 +337,12 @@ class SynthesisPlan(_Frozen):
     """Provider id -> the backend every call of that provider uses."""
     task: str
     extra_instructions: str | None
+    attachments: tuple[BuiltAttachment, ...] = ()
+    """The step-1 attachments, sorted; only the chair receives them."""
+
+    def attachment_metas(self) -> dict[str, AttachmentMeta]:
+        """Attachment id -> local metadata, for per-call token estimates."""
+        return {b.attachment.sha256: b.meta for b in self.attachments}
 
 
 def label_name(index: int) -> str:
@@ -465,9 +484,12 @@ def plan_synthesis(req: SynthesisRequest, deps: CompareDeps) -> SynthesisPlan:
 
     Raises:
         SelectionError: invalid task, answers or chair (or a chair on a backend that
-            differs from its provider's answer, or a cli chair without cli_flags).
+            differs from its provider's answer, or a cli chair without cli_flags, or a
+            chair that cannot receive an attached image).
         ResolutionError: the chair model cannot be resolved.
         PricingError: an ``api`` chair model has no verified price.
+        AttachmentError: an attachment id is unknown or expired, or the total is
+            too large.
     """
     _validate_request(req, deps)
     backends = _answer_backends(req.answers)
@@ -480,6 +502,8 @@ def plan_synthesis(req: SynthesisRequest, deps: CompareDeps) -> SynthesisPlan:
         provider=chair_model.provider,
         model_id=_alias_or(chair_model.provider, chair_model.model_id, chair_backend, deps),
     )
+    attachments = load_attachments(req.attachment_ids, deps)
+    _check_chair_attachments(attachments, chair_model, chair_backend, deps)
     reviewers: dict[str, ModelChoice] = {}
     for info, answer in zip(labels, ordered, strict=True):
         model_id = (
@@ -500,7 +524,33 @@ def plan_synthesis(req: SynthesisRequest, deps: CompareDeps) -> SynthesisPlan:
         backends=backends,
         task=req.task,
         extra_instructions=extra,
+        attachments=attachments,
     )
+
+
+def _check_chair_attachments(
+    attachments: Sequence[BuiltAttachment],
+    chair_model: ModelChoice,
+    backend: Backend,
+    deps: CompareDeps,
+) -> None:
+    """Refuse a chair that cannot receive an attachment (an image on ``cli`` or on a
+    model without native image input).
+
+    Raises:
+        SelectionError: with the file names and the reason (never file content).
+    """
+    if not attachments:
+        return
+    caps = deps.providers[(chair_model.provider, backend)].capabilities(chair_model.model_id)
+    refused = [
+        r for r in receipts(attachments, caps.input_modalities, backend) if r.mode == "refused"
+    ]
+    if refused:
+        reason = refusal_message(
+            refused, provider=chair_model.provider, model=chair_model.model_id, backend=backend
+        )
+        raise SelectionError(f"The chair cannot receive the attachments. {reason}")
 
 
 # --------------------------------------------------------------------------- estimates
@@ -586,7 +636,7 @@ def _review_calls(plan: SynthesisPlan, focus: AgreementOutcome | None) -> list[P
 
 
 def _chair_calls(
-    plan: SynthesisPlan, *, with_reviews: bool, resynthesis: bool = False
+    plan: SynthesisPlan, deps: CompareDeps, *, with_reviews: bool, resynthesis: bool = False
 ) -> list[PlannedCall]:
     return chair.estimate_chair(
         plan.answers,
@@ -595,7 +645,21 @@ def _chair_calls(
         with_reviews=with_reviews,
         extra_instructions=plan.extra_instructions,
         resynthesis=resynthesis,
+        attachments=[b.attachment for b in plan.attachments],
+        attachment_tokens=_chair_attachment_tokens(plan, deps) if plan.attachments else None,
     )
+
+
+def _chair_attachment_tokens(plan: SynthesisPlan, deps: CompareDeps) -> int:
+    backend = plan.backends.get(plan.chair.provider, Backend.API)
+    caps = deps.providers[(plan.chair.provider, backend)].capabilities(plan.chair.model_id)
+    tokens = attachment_tokens(
+        plan.attachments,
+        provider=plan.chair.provider,
+        input_modalities=caps.input_modalities,
+        backend=backend,
+    )
+    return sum(t or 0 for t in tokens.values())
 
 
 def _refuse_if_over(
@@ -625,7 +689,7 @@ def estimate_synthesis(req: SynthesisRequest, deps: CompareDeps) -> SynthesisEst
     per_stage: list[tuple[StageId, list[PlannedCall]]] = [
         ("agreement", _agreement_calls(plan)),
         ("review", _review_calls(plan, None)),
-        ("chair", _chair_calls(plan, with_reviews=True)),
+        ("chair", _chair_calls(plan, deps, with_reviews=True)),
     ]
     stages = tuple(
         StageEstimate(stage=stage, estimate=estimate_planned(calls, deps, plan.backends))
@@ -656,7 +720,7 @@ def estimate_resynthesis(req: ResynthesisRequest, deps: CompareDeps) -> CostEsti
     """
     plan = plan_synthesis(req, deps)
     return estimate_planned(
-        _chair_calls(plan, with_reviews=req.reviews is not None, resynthesis=True),
+        _chair_calls(plan, deps, with_reviews=req.reviews is not None, resynthesis=True),
         deps,
         plan.backends,
     )
@@ -665,8 +729,8 @@ def estimate_resynthesis(req: ResynthesisRequest, deps: CompareDeps) -> CostEsti
 # --------------------------------------------------------------------------- calls
 
 
-def _call_input_text(spec: CallSpec) -> str:
-    return "\n".join(m.content for m in (*spec.prompt.stable_prefix, *spec.prompt.variable_suffix))
+def _call_input_text(prompt: Prompt) -> str:
+    return "\n".join(m.content for m in (*prompt.stable_prefix, *prompt.variable_suffix))
 
 
 def make_call_fn(
@@ -674,6 +738,8 @@ def make_call_fn(
     deps: CompareDeps,
     records: list[CallCost],
     backends: Mapping[str, Backend] | None = None,
+    *,
+    attachment_metas: Mapping[str, AttachmentMeta] | None = None,
 ) -> CallFn:
     """Build the :data:`CallFn` the stages use.
 
@@ -684,14 +750,20 @@ def make_call_fn(
     the caller) goes through the vendor CLI and is recorded with ``cost=None``. Every
     completed call is appended to ``records``.
 
+    Attachments in a spec's prompt (the chair's, ADR 0007) are inlined as text for a
+    ``cli`` call (its adapter ignores ``Message.attachments``) and counted with
+    ``attachment_metas`` in the call's budget estimate.
+
     Raises (from the returned function):
         ProviderUnavailableError: the provider's key is not set (``api``), or the
             CLI is unavailable.
-        ProviderError: the vendor call failed.
+        ProviderError: the vendor call failed (``CapabilityNotSupportedError`` for
+            an image sent to a ``cli`` call).
         BudgetExceededError: the call could exceed a budget limit; it is not started.
         ResolutionError, PricingError, SelectionError: the model is unusable.
     """
     chosen = dict(backends or {})
+    metas = dict(attachment_metas or {})
 
     async def call(spec: CallSpec) -> CompletionResult:
         backend = chosen.get(spec.provider, Backend.API)
@@ -705,13 +777,22 @@ def make_call_fn(
             spec.provider, spec.model_id, spec.stage, member, backend=backend, deps=deps
         )
         price = checked_price(spec.provider, resolved.model_id, backend, deps)
+        prompt = inline_attachments(spec.prompt) if backend is Backend.CLI else spec.prompt
         call_high = Decimal(0)
         if price is not None:
+            caps = deps.providers[(spec.provider, backend)].capabilities(resolved.model_id)
             planned = PlannedCall(
                 stage=spec.stage,
                 provider=spec.provider,
                 model_id=resolved.model_id,
-                input_tokens=deps.count_tokens(_call_input_text(spec)),
+                input_tokens=deps.count_tokens(_call_input_text(prompt))
+                + prompt_attachment_tokens(
+                    prompt,
+                    metas,
+                    provider=spec.provider,
+                    input_modalities=caps.input_modalities,
+                    backend=backend,
+                ),
                 output_tokens_low=spec.max_output_tokens,
                 output_tokens_high=spec.max_output_tokens,
             )
@@ -722,7 +803,7 @@ def make_call_fn(
             tags["tag"] = spec.tag
         request = CompletionRequest(
             model=resolved.model_id,
-            prompt=spec.prompt,
+            prompt=prompt,
             response_schema=spec.response_schema,
             temperature=None,
             max_output_tokens=spec.max_output_tokens,
@@ -822,7 +903,9 @@ async def run_agreement_step(req: SynthesisRequest, deps: CompareDeps) -> Agreem
     """
     plan = plan_synthesis(req, deps)
     agreement_calls = _agreement_calls(plan)
-    _refuse_if_over([*agreement_calls, *_chair_calls(plan, with_reviews=False)], plan, req, deps)
+    _refuse_if_over(
+        [*agreement_calls, *_chair_calls(plan, deps, with_reviews=False)], plan, req, deps
+    )
     run_id = new_run_id()
     records: list[CallCost] = []
     try:
@@ -841,7 +924,9 @@ async def run_agreement_step(req: SynthesisRequest, deps: CompareDeps) -> Agreem
         threshold=AGREEMENT_SKIP_THRESHOLD,
         suggest_skip=ratio is not None and ratio >= AGREEMENT_SKIP_THRESHOLD,
         review_estimate=estimate_planned(_review_calls(plan, outcome), deps, plan.backends),
-        chair_estimate=estimate_planned(_chair_calls(plan, with_reviews=True), deps, plan.backends),
+        chair_estimate=estimate_planned(
+            _chair_calls(plan, deps, with_reviews=True), deps, plan.backends
+        ),
     )
 
 
@@ -857,13 +942,15 @@ async def run_finish_step(req: FinishRequest, deps: CompareDeps) -> FinishStepRe
     """
     plan = plan_synthesis(req, deps)
     with_reviews = not req.skip_review
-    planned = _chair_calls(plan, with_reviews=with_reviews)
+    planned = _chair_calls(plan, deps, with_reviews=with_reviews)
     if with_reviews:
         planned = [*_review_calls(plan, req.agreement), *planned]
     _refuse_if_over(planned, plan, req, deps)
     run_id = req.run_id or new_run_id()
     records: list[CallCost] = []
-    call = make_call_fn(run_id, deps, records, plan.backends)
+    call = make_call_fn(
+        run_id, deps, records, plan.backends, attachment_metas=plan.attachment_metas()
+    )
     reviews: ReviewOutcome | None = None
     if with_reviews:
         try:
@@ -887,6 +974,7 @@ async def run_finish_step(req: FinishRequest, deps: CompareDeps) -> FinishStepRe
             reviews=reviews,
             extra_instructions=plan.extra_instructions,
             call=call,
+            attachments=[b.attachment for b in plan.attachments],
         )
     except _STAGE_FAILURES as exc:
         raise _stage_error(chair.STAGE, exc) from None
@@ -940,7 +1028,7 @@ async def run_resynthesis(req: ResynthesisRequest, deps: CompareDeps) -> Resynth
     plan = plan_synthesis(req, deps)
     validate_rulings(req.rulings, req.previous)
     _refuse_if_over(
-        _chair_calls(plan, with_reviews=req.reviews is not None, resynthesis=True),
+        _chair_calls(plan, deps, with_reviews=req.reviews is not None, resynthesis=True),
         plan,
         req,
         deps,
@@ -955,9 +1043,12 @@ async def run_resynthesis(req: ResynthesisRequest, deps: CompareDeps) -> Resynth
             agreement=req.agreement,
             reviews=req.reviews,
             extra_instructions=plan.extra_instructions,
-            call=make_call_fn(run_id, deps, records, plan.backends),
+            call=make_call_fn(
+                run_id, deps, records, plan.backends, attachment_metas=plan.attachment_metas()
+            ),
             previous=req.previous,
             rulings=req.rulings,
+            attachments=[b.attachment for b in plan.attachments],
         )
     except _STAGE_FAILURES as exc:
         raise _stage_error(chair.STAGE, exc) from None
