@@ -1,4 +1,4 @@
-"""Pure tests for the Grok Build CLI adapter.
+"""Pure tests for the Grok Build CLI adapter and the skipped Gemini CLI adapter.
 
 No CLI is launched: ``resolve_executable`` is replaced, and ``parse_output`` gets
 canned stdout shaped like the documented ``--output-format json`` envelope.
@@ -6,6 +6,7 @@ canned stdout shaped like the documented ``--output-format json`` envelope.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -18,10 +19,12 @@ from llm_crossjury.core.providers.base import (
     Message,
     Prompt,
     ProviderError,
+    ProviderUnavailableError,
     ReasoningEffort,
     Role,
 )
-from llm_crossjury.core.providers.cli import _subprocess, grok_cli
+from llm_crossjury.core.providers.cli import _subprocess, gemini_cli, grok_cli
+from llm_crossjury.core.providers.cli.gemini_cli import GeminiCliProvider
 from llm_crossjury.core.providers.cli.grok_cli import GrokCliProvider
 from llm_crossjury.core.registry import (
     CliFlags,
@@ -381,3 +384,32 @@ def test_parse_requires_text(provider: GrokCliProvider) -> None:
 
 def test_parse_non_string_stop_reason(provider: GrokCliProvider) -> None:
     assert provider.parse_output(_envelope(stopReason=3), _request()).finish_reason is None
+
+
+# --------------------------------------------------------------------------- Gemini CLI
+
+
+def test_gemini_cli_is_skipped_for_s6() -> None:
+    reason = GeminiCliProvider.skipped_reason
+
+    assert reason == gemini_cli.GEMINI_CLI_SKIPPED_REASON
+    assert reason.startswith("S6")
+    assert "https://github.com/google-gemini/gemini-cli/discussions/27274" in reason
+    assert "https://antigravity.google/docs/faq/" in reason
+
+
+def test_gemini_cli_complete_and_check_raise(tmp_path: Path) -> None:
+    p = GeminiCliProvider()
+
+    with pytest.raises(ProviderUnavailableError, match="S6"):
+        asyncio.run(p.complete(_request()))
+    with pytest.raises(ProviderUnavailableError, match="S6"):
+        asyncio.run(p.check())
+    with pytest.raises(ProviderUnavailableError):
+        p.build_invocation(_request(), tmp_path)
+    with pytest.raises(ProviderUnavailableError):
+        p.parse_output("{}", _request())
+    with pytest.raises(ProviderUnavailableError):
+        asyncio.run(p.count_input_tokens(_request()))
+    assert not any(p.capabilities("m").model_dump().values())
+    assert list(tmp_path.iterdir()) == []
