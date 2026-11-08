@@ -18,6 +18,26 @@ Sources (verified 2026-11-08):
   https://docs.x.ai/developers/rest-api-reference
 * xAI Responses reference: https://docs.x.ai/developers/rest-api-reference/inference/responses
 
+Attachments (ADR 0007), verified 2026-11-08. Every attachment is sent inline in the
+user message's ``content`` list, before the message text; no Files API is used:
+
+* PDF: ``{"type": "input_file", "filename", "file_data":
+  "data:application/pdf;base64,..."}``. ``detail`` is optional and defaults to
+  ``auto``, so it is not sent
+  (https://developers.openai.com/api/docs/guides/pdf-files).
+* Image: ``{"type": "input_image", "image_url": "data:<media type>;base64,..."}``.
+  ``detail`` is optional ("If you omit the parameter, it defaults to ``auto``"), so it
+  is not sent (https://developers.openai.com/api/docs/guides/images-vision). xAI uses
+  the same shape and its base64 example omits ``detail``
+  (https://docs.x.ai/developers/model-capabilities/images/understanding).
+* Token counting accepts the same image and file parts as ``responses.create``
+  (https://developers.openai.com/api/docs/guides/token-counting), so
+  ``count_input_tokens`` counts the rendered attachments.
+* Anything not sent natively is inlined as an ``input_text`` part holding the locally
+  extracted ``fallback_text`` in a delimited ``<attachment>`` block, with closing tags
+  escaped. Attachment bytes, base64 and text never appear in errors or
+  ``native_params_used``.
+
 Security notes:
 
 * The API key is read from the environment at call time and handed to a client that
@@ -30,6 +50,7 @@ Security notes:
 
 from __future__ import annotations
 
+import base64
 import copy
 import json
 import os
@@ -44,9 +65,12 @@ from openai import AsyncOpenAI
 
 from llm_crossjury.core.providers.api._common import ApiProviderBase
 from llm_crossjury.core.providers.base import (
+    Attachment,
+    AttachmentKind,
     BatchHandle,
     BatchState,
     Capabilities,
+    CapabilityNotSupportedError,
     CompletionRequest,
     CompletionResult,
     Message,
@@ -127,6 +151,29 @@ def format_instructions(schema: Mapping[str, Any]) -> str:
     )
 
 
+def fallback_block(attachment: Attachment) -> str:
+    r"""Return the canonical delimited text block for an attachment (ADR 0007).
+
+    Every ``</attachment>`` inside the extracted text is escaped as
+    ``<\/attachment>`` so the content cannot close the block early.
+
+    Args:
+        attachment: An attachment whose ``fallback_text`` is set.
+
+    Returns:
+        The block, from the opening tag to the closing tag.
+    """
+    text = (attachment.fallback_text or "").replace("</attachment>", "<\\/attachment>")
+    return (
+        f'<attachment name="{attachment.filename}" type="{attachment.media_type}" '
+        f'sha256="{attachment.sha256[:12]}">\n{text}\n</attachment>'
+    )
+
+
+def _data_url(media_type: str, data: bytes) -> str:
+    return f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
+
+
 def _redact(text: str, secret: str | None) -> str:
     if secret:
         text = text.replace(secret, _REDACTED)
@@ -168,6 +215,13 @@ class OpenAICompatProvider(ApiProviderBase):
     documents_prompt_caching: bool = False
     """Whether the vendor officially documents prompt caching (automatic counts)."""
 
+    never_native: frozenset[AttachmentKind] = frozenset()
+    """Attachment kinds never sent natively, even if the registry lists them."""
+
+    native_image_media_types: frozenset[str] = frozenset()
+    """Image media types the vendor documents for ``input_image``. Images of other
+    types use ``fallback_text`` or are refused."""
+
     def __init__(
         self,
         api_key_env: str | None = None,
@@ -184,6 +238,7 @@ class OpenAICompatProvider(ApiProviderBase):
         """Return capabilities from the registry entry for ``model``.
 
         Without a registry or an entry, only ``temperature`` is declared.
+        ``input_modalities`` comes from the entry, minus :attr:`never_native`.
 
         Args:
             model: Concrete vendor model id.
@@ -207,19 +262,66 @@ class OpenAICompatProvider(ApiProviderBase):
             temperature=True,
             reasoning=entry.reasoning_control.type
             in (ReasoningControlType.LEVELS, ReasoningControlType.BUDGET),
+            input_modalities=frozenset(entry.input_modalities or ()) - self.never_native,
         )
 
     # ------------------------------------------------------------------ request mapping
 
+    def render_attachment(
+        self, attachment: Attachment, *, model: str, native: frozenset[AttachmentKind]
+    ) -> dict[str, str]:
+        """Render one attachment as a Responses ``input`` content part.
+
+        ``DOCUMENT`` is never sent natively (ADR 0007). A PDF or image goes natively
+        when its kind is in ``native`` (and, for images, its media type is in
+        :attr:`native_image_media_types`); otherwise ``fallback_text`` is inlined.
+
+        Args:
+            attachment: The attachment.
+            model: Concrete model id, for the error message.
+            native: The model's native ``input_modalities``.
+
+        Returns:
+            An ``input_file``, ``input_image`` or ``input_text`` part.
+
+        Raises:
+            CapabilityNotSupportedError: the attachment cannot be sent natively and
+                has no ``fallback_text``.
+        """
+        kind = attachment.kind
+        if kind is AttachmentKind.PDF and kind in native:
+            return {
+                "type": "input_file",
+                "filename": attachment.filename,
+                "file_data": _data_url("application/pdf", attachment.data),
+            }
+        if (
+            kind is AttachmentKind.IMAGE
+            and kind in native
+            and attachment.media_type in self.native_image_media_types
+        ):
+            return {
+                "type": "input_image",
+                "image_url": _data_url(attachment.media_type, attachment.data),
+            }
+        if attachment.fallback_text is not None:
+            return {"type": "input_text", "text": fallback_block(attachment)}
+        raise CapabilityNotSupportedError(
+            f"{self.name}: model {model} cannot read attachment {attachment.filename!r} "
+            f"({kind.value}, {attachment.media_type}) natively and it has no text fallback"
+        )
+
     def build_input(
         self, request: CompletionRequest, *, native_schema: bool
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         """Map the prompt onto Responses ``input`` messages.
 
         ``stable_prefix`` comes first, unchanged, so the vendor's automatic prefix
-        caching can hit; no explicit cache marker exists or is needed. If a schema is
-        requested but not sent natively, format instructions are appended to the last
-        user message (or a new user message if there is none).
+        caching can hit; no explicit cache marker exists or is needed. A user message
+        with attachments gets a list of content parts: the attachments in their given
+        order, then the text as an ``input_text`` part. If a schema is requested but
+        not sent natively, format instructions are appended to the last user message's
+        text (or a new user message if there is none).
 
         Args:
             request: The completion request.
@@ -229,23 +331,38 @@ class OpenAICompatProvider(ApiProviderBase):
             A list of ``{"role", "content"}`` message dicts.
 
         Raises:
-            ProviderError: a system message appears in ``variable_suffix``.
+            ProviderError: a system message appears in ``variable_suffix``, or a
+                non-user message carries attachments.
+            CapabilityNotSupportedError: an attachment can be sent neither natively
+                nor as text.
         """
         if any(m.role is Role.SYSTEM for m in request.prompt.variable_suffix):
             raise ProviderError(f"{self.name}: system messages are only allowed in stable_prefix")
         messages: list[Message] = [*request.prompt.stable_prefix, *request.prompt.variable_suffix]
-        items = [
-            {
-                "role": self.system_role if m.role is Role.SYSTEM else m.role.value,
-                "content": m.content,
-            }
-            for m in messages
-        ]
+        if any(m.attachments and m.role is not Role.USER for m in messages):
+            raise ProviderError(f"{self.name}: attachments are only allowed on user messages")
+        native = self.capabilities(request.model).input_modalities
+        items: list[dict[str, Any]] = []
+        for m in messages:
+            content: str | list[dict[str, str]] = m.content
+            if m.attachments:
+                content = [
+                    *(
+                        self.render_attachment(a, model=request.model, native=native)
+                        for a in m.attachments
+                    ),
+                    {"type": "input_text", "text": m.content},
+                ]
+            role = self.system_role if m.role is Role.SYSTEM else m.role.value
+            items.append({"role": role, "content": content})
         if request.response_schema is not None and not native_schema:
             extra = format_instructions(request.response_schema)
             for item in reversed(items):
                 if item["role"] == Role.USER.value:
-                    item["content"] += extra
+                    if isinstance(item["content"], list):
+                        item["content"][-1]["text"] += extra
+                    else:
+                        item["content"] += extra
                     break
             else:
                 items.append({"role": Role.USER.value, "content": extra.lstrip()})
