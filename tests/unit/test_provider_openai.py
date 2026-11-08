@@ -332,6 +332,7 @@ def test_complete_maps_prompt_and_result() -> None:
             {"role": "user", "content": "doc"},
             {"role": "user", "content": "question"},
         ],
+        "store": False,
     }
     assert client.closed
     assert client.factory_args == (FAKE_KEY, None)
@@ -379,7 +380,20 @@ def test_no_defaults_invented() -> None:
     install(provider, client)
     run(provider.complete(make_request()))
     (call,) = client.responses.calls
-    assert set(call) == {"model", "input"}
+    # ``store: False`` is the only adapter-side default: a privacy setting, not a
+    # generation parameter (vendors otherwise retain responses).
+    assert set(call) == {"model", "input", "store"}
+    assert call["store"] is False
+
+
+@pytest.mark.usefixtures("key")
+def test_native_params_can_override_store() -> None:
+    provider = OpenAIApiProvider()
+    client = FakeClient(make_response())
+    install(provider, client)
+    run(provider.complete(make_request(native_params={"store": True})))
+    (call,) = client.responses.calls
+    assert call["store"] is True
 
 
 @pytest.mark.usefixtures("key")

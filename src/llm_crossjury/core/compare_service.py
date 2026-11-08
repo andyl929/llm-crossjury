@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import math
 import os
 import time
 import uuid
@@ -36,7 +35,12 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from llm_crossjury.core.config import BudgetConfig, CostConfig
-from llm_crossjury.core.cost.estimate import CallPlan, CostEstimate, CostEstimator
+from llm_crossjury.core.cost.estimate import (
+    CallPlan,
+    CostEstimate,
+    CostEstimator,
+    estimate_tokens,
+)
 from llm_crossjury.core.cost.ledger import (
     Budget,
     BudgetExceededError,
@@ -62,6 +66,7 @@ from llm_crossjury.core.registry.resolver import (
     ModelResolver,
     ResolutionMode,
     ResolvedModel,
+    resolve_models_path,
 )
 from llm_crossjury.core.registry.resolver import Role as ModelRole
 from llm_crossjury.core.registry.schema import ModelEntry, Pricing
@@ -238,14 +243,6 @@ def _real_compute_cost(usage: Usage, price: Pricing) -> Decimal | None:
     return compute_cost(usage, price, batched=False)
 
 
-def fallback_estimate_tokens(text: str) -> int:
-    """Conservative local token heuristic (about 3 characters per token).
-
-    TODO(integration): replace with ``core.cost.estimate.estimate_tokens``.
-    """
-    return max(1, math.ceil(len(text) / 3))
-
-
 def default_prompts_dir() -> Path:
     """Locate the repository's ``prompts/`` directory relative to this package.
 
@@ -288,28 +285,13 @@ class CompareDeps:
     ledger: LedgerLike
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     compute_cost: CostFn = _real_compute_cost
-    count_tokens: TokenCounter = fallback_estimate_tokens
+    count_tokens: TokenCounter = estimate_tokens
     prompts_dir: Path = field(default_factory=default_prompts_dir)
 
 
 def key_is_set(env_var: str) -> bool:
     """Return whether ``env_var`` holds a non-empty value. Never exposes the value."""
     return bool(os.environ.get(env_var, "").strip())
-
-
-def _resolve_models_path(base_dir: Path) -> Path:
-    """Registry location: ``$LLM_CROSSJURY_MODELS``, then ``config/models.local.yaml``,
-    then ``config/models.yaml`` under ``base_dir``.
-
-    TODO(integration): replace with ``core.registry.resolver.resolve_models_path``.
-    """
-    env = os.environ.get("LLM_CROSSJURY_MODELS", "").strip()
-    if env:
-        return Path(env)
-    local = base_dir / "config" / "models.local.yaml"
-    if local.is_file():
-        return local
-    return base_dir / "config" / "models.yaml"
 
 
 def build_default_deps(base_dir: Path) -> CompareDeps:
@@ -332,20 +314,20 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
     )
 
     load_dotenv(base_dir / ".env", override=False)
-    registry = ModelRegistry.load(_resolve_models_path(base_dir))
+    registry = ModelRegistry.load(resolve_models_path(base_dir))
     pricing = PricingTable(registry)
     cost_config = CostConfig()
     estimator = CostEstimator(
         pricing,
         cache_hit_rate=0.0,  # one call per vendor: no shared cache entries
         reasoning_multipliers=dict(cost_config.reasoning_multipliers),
+        currency=BudgetConfig().currency,
     )
-    # TODO(integration): the API providers gain ``registry=``; drop the ignores then.
     api_providers = (
-        AnthropicApiProvider(registry=registry),  # type: ignore[call-arg]
-        OpenAIApiProvider(registry=registry),  # type: ignore[call-arg]
-        GeminiApiProvider(registry=registry),  # type: ignore[call-arg]
-        XaiApiProvider(registry=registry),  # type: ignore[call-arg]
+        AnthropicApiProvider(registry=registry),
+        OpenAIApiProvider(registry=registry),
+        GeminiApiProvider(registry=registry),
+        XaiApiProvider(registry=registry),
     )
     return CompareDeps(
         providers={p.name: p for p in api_providers},

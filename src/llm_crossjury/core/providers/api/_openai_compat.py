@@ -283,6 +283,9 @@ class OpenAICompatProvider(ApiProviderBase):
             kwargs["temperature"] = request.temperature
         if request.timeout_s is not None:
             kwargs["timeout"] = request.timeout_s
+        # Privacy default: ask the vendor not to retain the response (the project's
+        # store_content default is false). A member's ``native`` passthrough can override it.
+        kwargs.setdefault("store", False)
         return deep_merge(kwargs, request.native_params)
 
     # ------------------------------------------------------------------ usage mapping
