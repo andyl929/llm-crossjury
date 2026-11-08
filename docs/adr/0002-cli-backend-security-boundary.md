@@ -3,6 +3,7 @@
 - Status: Accepted (the backend itself is *experimental*)
 - Date: 2026-11-04
 - Amended: 2026-11-04 (Grok Build CLI no longer pre-skipped)
+- Amended: 2026-11-08 (status per CLI after implementation; SIWC rejected)
 
 ## Context
 
@@ -80,16 +81,22 @@ recorded in its adapter's `skipped_reason` and in this ADR's table:
 
 ### Status per CLI (v1)
 
+*Amended 2026-11-08* after implementation against the vendors' current docs (sources
+are cited in each adapter's docstring).
+
 | CLI | Status | Notes |
 |---|---|---|
-| `claude` | Planned | Each condition to be verified against current official docs during implementation |
-| `codex` | Planned | Same |
-| `gemini` | Planned | Same |
-| `grok` | Planned (evaluate in phase 1B) | xAI's official **Grok Build CLI**, command `grok`, which supports subscription login and `XAI_API_KEY`. S1 is satisfied. S2–S7 are evaluated in phase 1B; the key path is excluded by rule 10 |
+| `claude` | **Supported (experimental)** | `claude -p --output-format json --safe-mode`, tools off (`--tools ""`, MCP denied, `--strict-mcp-config`, `dontAsk`), prompt on stdin, system prompt from a temp file. Anthropic permits "an end user … signing in to the unmodified Claude Code binary with their own Claude subscription" (code.claude.com/docs/en/legal-and-compliance). **Risk:** the headless docs say `--bare`, which does not read the OAuth login, "will become the default for `-p` in a future release"; re-check on every release |
+| `codex` | **Supported (experimental)** | `codex exec - --json`, read-only sandbox, `approval_policy=never`, shell/web/apps/plugins/hooks/memories off, user config ignored, any tool event rejected. OpenAI documents that `codex exec` reuses the saved CLI login |
+| `grok` | **Experimental (terms unverified)** | Grok Build headless mode with `--prompt-file` (no stdin; S4 met via a temp file), `--verbatim`, tool allow/deny lists, `--sandbox strict` (not enforced on Windows), `GROK_MEMORY=0`. xAI's legal pages could not be retrieved automatically; the maintainer must read them before release. Labelled experimental in the UI, and usable only once registry entries with verified `cli_flags` exist (none are configured yet) |
+| `gemini` | **Skipped (S6)** | Gemini CLI stopped serving Google AI Pro/Ultra and free accounts on 2026-06-18 (google-gemini/gemini-cli discussion 27274); the replacement, Antigravity CLI, states that wrapping it in third-party applications "is not supported under consumer plans" (antigravity.google/docs/faq). Gemini users use the `api` backend |
+| `agy` | **Skipped (S6)** | As above |
 
-The statuses above are design intent. No CLI is skipped in advance. Each "Planned" entry must be re-checked
-against the vendor's current documentation before its adapter is implemented, and
-moved to "Skipped" with a reason if any condition fails.
+**Rejected alternative:** OpenAI "Sign in with ChatGPT" for third-party local apps is
+OpenAI's sanctioned program for this use case, but it requires the host application to
+run OAuth and store and refresh tokens, which violates "What llm-crossjury never does".
+
+**Attachments:** `cli` members receive attachments only as extracted text (ADR 0007).
 
 ## Consequences
 
