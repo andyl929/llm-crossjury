@@ -6,8 +6,10 @@ from llm_crossjury.core.cost.ledger import (
     BudgetExceededError,
     Ledger,
     LedgerEntry,
+    LedgerError,
     RunCostSummary,
     SqliteLedger,
+    compute_cost,
 )
 from llm_crossjury.core.cost.pricing import PricingError, PricingTable
 
@@ -20,8 +22,10 @@ __all__ = [
     "EstimateLine",
     "Ledger",
     "LedgerEntry",
+    "LedgerError",
     "PricingError",
     "PricingTable",
     "RunCostSummary",
     "SqliteLedger",
+    "compute_cost",
 ]
