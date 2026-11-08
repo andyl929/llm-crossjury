@@ -1,6 +1,12 @@
 """Cost estimation, pricing, and the spend ledger (ADR 0003)."""
 
-from llm_crossjury.core.cost.estimate import CallPlan, CostEstimate, CostEstimator, EstimateLine
+from llm_crossjury.core.cost.estimate import (
+    CallPlan,
+    CostEstimate,
+    CostEstimator,
+    EstimateLine,
+    estimate_tokens,
+)
 from llm_crossjury.core.cost.ledger import (
     Budget,
     BudgetExceededError,
@@ -28,4 +34,5 @@ __all__ = [
     "RunCostSummary",
     "SqliteLedger",
     "compute_cost",
+    "estimate_tokens",
 ]
