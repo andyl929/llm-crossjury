@@ -189,8 +189,8 @@ def test_stage_failure_is_502_without_key_material(
         monkeypatch.setenv(env, FAKE_KEY)
     deps = make_deps(key_envs=KEY_ENVS)
     providers = dict(deps.providers)
-    for name in providers:
-        providers[name] = raising_provider(name, ProviderError("vendor unavailable"))
+    for key in providers:
+        providers[key] = raising_provider(key[0], ProviderError("vendor unavailable"))
     broken = CompareDeps(**{**deps.__dict__, "providers": providers})
     response = _client(broken).post("/api/synthesis/agreement", json=_body())
     assert response.status_code == 502

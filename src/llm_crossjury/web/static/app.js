@@ -7,6 +7,9 @@
     providers: [],
     defaultMaxTokens: 4096,
     budget: null,
+    consentText: "",
+    backends: {},       // provider -> "api" | "cli" (subscription)
+    cardValues: {},     // provider -> values kept across card rebuilds
     estimate: null,     // last estimate response
     estimateKey: null,  // JSON of the request the estimate belongs to
     busy: false,
@@ -42,6 +45,27 @@
 
   function tokens(value) {
     return value === null || value === undefined ? "?" : Number(value).toLocaleString("en-US");
+  }
+
+  // Subscription (cli) calls have no known cost: they count against the plan.
+  function planUsage(calls) {
+    return "plan usage (" + calls + " call" + (calls === 1 ? "" : "s") + ")";
+  }
+
+  function cliCalls(lines) {
+    return (lines || []).filter((l) => l.backend === "cli").reduce((n, l) => n + l.calls, 0);
+  }
+
+  function hasPriced(lines) {
+    return (lines || []).some((l) => l.backend !== "cli");
+  }
+
+  // Cost text for a priced range plus a number of subscription calls.
+  function costText(range, priced, calls) {
+    const parts = [];
+    if (priced || !calls) parts.push(range);
+    if (calls) parts.push(planUsage(calls));
+    return parts.join(" + ");
   }
 
   async function api(path, body) {
@@ -96,37 +120,111 @@
   }
 
   // ------------------------------------------------------------------ providers
+  //
+  // Each card offers a backend: "api" (API key) or "cli" ("Subscription": the
+  // vendor's official CLI the user signed in to). Switching rebuilds the card.
+
+  function backendOf(name) {
+    return state.backends[name] || "api";
+  }
+
+  function captureCards() {
+    for (const p of state.providers) {
+      const checkbox = $("use-" + p.name);
+      if (!checkbox) continue;
+      const values = state.cardValues[p.name] || { models: {} };
+      values.checked = checkbox.checked;
+      values.temp = $("temp-" + p.name).value;
+      values.max = $("max-" + p.name).value;
+      values.models[backendOf(p.name)] = $("model-" + p.name).value;
+      state.cardValues[p.name] = values;
+    }
+  }
 
   function renderProviders() {
+    captureCards();
     const box = $("providers");
     box.replaceChildren();
     for (const p of state.providers) box.append(providerCard(p));
+    onSelectionChange();
+  }
+
+  function setBackend(p, backend) {
+    captureCards();
+    state.backends[p.name] = backend;
+    $("card-" + p.name).replaceWith(providerCard(p));
+    onSelectionChange();
+  }
+
+  function backendToggle(p, backend) {
+    const option = (value, text) => el("label", { class: "seg" + (backend === value ? " seg-on" : "") }, [
+      el("input", { type: "radio", name: "backend-" + p.name, value: value, checked: backend === value,
+        onchange: () => setBackend(p, value) }),
+      text,
+    ]);
+    return el("div", { class: "backend-toggle", role: "radiogroup", "aria-label": p.label + " backend" }, [
+      option("api", "API key"),
+      option("cli", "Subscription"),
+    ]);
+  }
+
+  function cliStatusBlock(p) {
+    const cli = p.cli;
+    const name = cli.product + " (" + cli.command + ")" + (cli.version ? " " + cli.version : "");
+    const line = el("p", { class: "cli-line" }, [
+      el("span", { class: "badge " + (cli.available ? "badge-ok" : "badge-warn"), text: cli.available ? "CLI found" : "CLI not found" }),
+      " ", name,
+    ]);
+    const recheck = el("button", { type: "button", class: "btn btn-small", text: "Re-check", onclick: () => loadProviders(true) });
+    const help = el("details", { class: "cli-help", open: !cli.available }, [
+      el("summary", { text: "Install and sign in" }),
+      el("p", { class: "muted", text: "Install with one of the official commands:" }),
+      el("ul", { class: "plain cli-commands" }, cli.install.map((c) => el("li", {}, el("code", { text: c })))),
+      el("p", { class: "muted", text: cli.sign_in }),
+      el("div", { class: "actions" }, [recheck]),
+    ]);
+    const detail = cli.available ? null : el("p", { class: "hint", text: cli.detail });
+    return el("div", { class: "cli-status" }, [line, detail, help]);
   }
 
   function providerCard(p) {
-    const keyMissing = p.key_status === "not set";
-    const noModels = p.models.length === 0;
-    const disabled = keyMissing || noModels;
+    const backend = p.cli ? backendOf(p.name) : "api";
+    state.backends[p.name] = backend;
+    const values = state.cardValues[p.name] || { models: {} };
+    const isCli = backend === "cli";
+    const models = isCli ? p.cli.models : p.models;
+    const defaultModel = isCli ? p.cli.default_model : p.default_model;
+    const keyMissing = !isCli && p.key_status === "not set";
+    const cliMissing = isCli && !p.cli.available;
+    const noModels = models.length === 0;
+    const disabled = keyMissing || cliMissing || noModels;
 
-    const checkbox = el("input", { type: "checkbox", id: "use-" + p.name, disabled: disabled, onchange: onSelectionChange });
+    const checkbox = el("input", { type: "checkbox", id: "use-" + p.name, disabled: disabled,
+      checked: !disabled && !!values.checked, onchange: onSelectionChange });
     checkbox.dataset.provider = p.name;
 
-    const badge = p.key_status === "not required"
-      ? null
-      : el("span", { class: "badge " + (keyMissing ? "badge-warn" : "badge-ok"), text: keyMissing ? "key not set" : "key set" });
+    const badges = [];
+    if (isCli) {
+      if (p.cli.experimental) badges.push(el("span", { class: "badge badge-warn", text: "experimental" }));
+    } else if (p.key_status !== "not required") {
+      badges.push(el("span", { class: "badge " + (keyMissing ? "badge-warn" : "badge-ok"), text: keyMissing ? "key not set" : "key set" }));
+    }
 
     const select = el("select", { id: "model-" + p.name, disabled: disabled, "aria-label": p.label + " model", onchange: onSelectionChange });
     if (noModels) select.append(el("option", { text: "No usable models" }));
-    for (const m of p.models) {
-      select.append(el("option", { value: m.id, text: m.label, selected: m.id === p.default_model }));
+    const kept = values.models[backend];
+    const chosen = models.some((m) => m.id === kept) ? kept : defaultModel;
+    for (const m of models) {
+      select.append(el("option", { value: m.id, text: m.label, selected: m.id === chosen }));
     }
 
     const temperature = el("input", {
       id: "temp-" + p.name, type: "number", min: "0", step: "0.1", placeholder: "default",
-      disabled: disabled, oninput: onSelectionChange,
+      value: values.temp || null, disabled: disabled, oninput: onSelectionChange,
     });
     const maxTokens = el("input", {
-      id: "max-" + p.name, type: "number", min: "1", step: "1", value: String(state.defaultMaxTokens),
+      id: "max-" + p.name, type: "number", min: "1", step: "1",
+      value: values.max !== undefined ? values.max : String(state.defaultMaxTokens),
       disabled: disabled, oninput: onSelectionChange,
     });
     const settings = el("details", { class: "settings" }, [
@@ -140,14 +238,19 @@
     let hint = null;
     if (keyMissing) {
       hint = el("p", { class: "hint" }, ["Set ", el("code", { text: p.key_env }), " in .env and restart the UI."]);
+    } else if (noModels && isCli) {
+      if (!cliMissing) hint = el("p", { class: "hint", text: "No usable models: add a registry entry with the cli backend and cli_flags." });
     } else if (noModels) {
       hint = el("p", { class: "hint", text: "No usable models: add a verified api entry with pricing to the model registry." });
     }
 
     return el("div", { class: "provider" + (disabled ? " disabled" : ""), id: "card-" + p.name }, [
       el("label", { class: "provider-head", for: "use-" + p.name }, [
-        checkbox, el("span", { class: "provider-name", text: p.label }), badge,
+        checkbox, el("span", { class: "provider-name", text: p.label }), ...badges,
       ]),
+      p.cli ? backendToggle(p, backend) : null,
+      p.subscription_note ? el("p", { class: "muted backend-note", text: p.subscription_note }) : null,
+      isCli ? cliStatusBlock(p) : null,
       select,
       settings,
       hint,
@@ -163,6 +266,7 @@
       const maxTokens = $("max-" + p.name).value.trim();
       result.push({
         provider: p.name,
+        backend: backendOf(p.name),
         model: $("model-" + p.name).value,
         temperature: temp === "" ? null : Number(temp),
         max_output_tokens: maxTokens === "" ? state.defaultMaxTokens : Number(maxTokens),
@@ -173,6 +277,30 @@
 
   function currentRequest() {
     return { task: $("task").value, selections: selections() };
+  }
+
+  function needsConsent(req) {
+    return req.selections.some((s) => s.backend === "cli");
+  }
+
+  async function loadProviders(refresh) {
+    try {
+      const data = await api("/api/providers" + (refresh ? "?refresh=true" : ""));
+      state.providers = data.providers;
+      state.defaultMaxTokens = data.default_max_output_tokens;
+      state.budget = data.budget;
+      state.consentText = data.consent_text;
+      $("consent-text").textContent = data.consent_text;
+      $("syn-consent-text").textContent = data.consent_text;
+      renderBudgetSummary();
+      renderProviders();
+    } catch (error) {
+      if (!state.providers.length) {
+        $("providers").replaceChildren(el("p", { class: "muted", text: "Could not load providers." }));
+      }
+      showMessage(error.message);
+    }
+    updateButtons();
   }
 
   // ------------------------------------------------------------------ estimate
@@ -196,31 +324,42 @@
   function updateButtons() {
     const req = currentRequest();
     const ready = req.task.trim() !== "" && req.selections.length > 0;
+    const consentNeeded = needsConsent(req);
+    $("consent-box").hidden = !consentNeeded;
+    const consented = !consentNeeded || $("consent").checked;
     $("estimate-btn").disabled = state.busy || !ready;
     const estimateValid = state.estimate && state.estimateKey === JSON.stringify(req);
-    $("run-btn").disabled = state.busy || !estimateValid || state.estimate.budget.refused;
+    $("run-btn").disabled = state.busy || !estimateValid || state.estimate.budget.refused || !consented;
     const hint = $("action-hint");
     if (!ready) hint.textContent = "Enter a task and pick at least one model.";
     else if (!estimateValid) hint.textContent = "Estimate the cost before running.";
     else if (state.estimate.budget.refused) hint.textContent = "The budget refuses this run.";
+    else if (!consented) hint.textContent = "Tick the consent box to run subscription models.";
     else hint.textContent = "";
   }
 
   function renderEstimate(est) {
     const b = est.budget;
     const box = $("estimate");
+    const range = money(est.currency, est.total_low) + " \u2013 " + money(est.currency, est.total_high);
     box.replaceChildren(
       el("div", { class: "estimate-range" }, [
-        "Estimated cost: " + money(est.currency, est.total_low) + " \u2013 " + money(est.currency, est.total_high),
+        "Estimated cost: " + costText(range, hasPriced(est.lines), est.cli_calls),
       ]),
       el("ul", { class: "estimate-lines" }, est.lines.map((line) =>
-        el("li", { text: providerLabel(line.provider) + " \u00b7 " + line.model + ": " +
-          money(est.currency, line.cost_low) + " \u2013 " + money(est.currency, line.cost_high) }))),
+        el("li", { text: providerLabel(line.provider) + (line.backend === "cli" ? " (subscription)" : "") +
+          " \u00b7 " + line.model + ": " + (line.backend === "cli"
+            ? planUsage(line.calls)
+            : money(est.currency, line.cost_low) + " \u2013 " + money(est.currency, line.cost_high)) }))),
       el("p", { class: "estimate-note muted", text:
         "Budget: run limit " + money(b.currency, b.run_limit) +
         ", confirm above " + money(b.currency, b.confirm_above) +
         ", today " + money(b.currency, b.daily_remaining) + " left of " + money(b.currency, b.daily_limit) + "." }),
     );
+    if (est.cli_calls) {
+      box.append(el("p", { class: "estimate-note muted", text:
+        "Subscription calls have unknown cost and count against your plan's usage limits; budget limits apply to priced calls only." }));
+    }
     for (const w of est.warnings) box.append(el("p", { class: "estimate-note note-warn", text: w }));
     if (b.refused) {
       box.append(el("p", { class: "estimate-note note-error", text: "Refused: " + (b.refusal_reason || "over budget") }));
@@ -266,12 +405,16 @@
     return p ? p.label : name;
   }
 
+  function modelLine(model, backend) {
+    return model + (backend === "cli" ? " \u00b7 subscription" : "");
+  }
+
   function renderPending(req) {
     $("results").replaceChildren(...req.selections.map((s) =>
       el("article", { class: "result" }, [
         el("div", { class: "result-head" }, [
           el("div", { class: "result-provider", text: providerLabel(s.provider) }),
-          el("div", { class: "result-model", text: s.model }),
+          el("div", { class: "result-model", text: modelLine(s.model, s.backend) }),
         ]),
         el("div", { class: "result-body pending" }, [el("span", { class: "spinner" }), "Waiting for the answer..."]),
       ])));
@@ -282,18 +425,20 @@
   function renderResults(result) {
     $("results").replaceChildren(...result.members.map((m) => {
       const meta = [];
+      const cli = m.backend === "cli";
       if (m.usage) {
-        meta.push("in " + tokens(m.usage.input_tokens) + " tok");
-        meta.push("out " + tokens(m.usage.output_tokens) + " tok");
+        const known = (v) => v !== null && v !== undefined;
+        if (!cli || known(m.usage.input_tokens)) meta.push("in " + tokens(m.usage.input_tokens) + " tok");
+        if (!cli || known(m.usage.output_tokens)) meta.push("out " + tokens(m.usage.output_tokens) + " tok");
         if (m.usage.reasoning_tokens) meta.push("reasoning " + tokens(m.usage.reasoning_tokens) + " tok");
         if (m.usage.cached_input_tokens) meta.push("cached " + tokens(m.usage.cached_input_tokens) + " tok");
       }
-      if (m.error === null) meta.push(money(m.currency, m.cost));
+      if (m.error === null) meta.push(cli && m.cost === null ? planUsage(1) : money(m.currency, m.cost));
       if (m.latency_s !== null && m.latency_s !== undefined) meta.push(Number(m.latency_s).toFixed(1) + " s");
       return el("article", { class: "result" }, [
         el("div", { class: "result-head" }, [
           el("div", { class: "result-provider", text: providerLabel(m.provider) }),
-          el("div", { class: "result-model", text: m.model }),
+          el("div", { class: "result-model", text: modelLine(m.model, m.backend) }),
           meta.length ? el("div", { class: "result-meta" }, meta.map((t) => el("span", { text: t }))) : null,
         ]),
         m.error !== null
@@ -301,8 +446,11 @@
           : el("div", { class: "result-body", text: m.text }),
       ]);
     }));
+    const planCalls = result.members.filter((m) => m.backend === "cli" && m.error === null && m.cost === null).length;
+    const otherUnknown = result.unknown_cost_members - planCalls;
     let total = "Total " + money(result.currency, result.total_cost);
-    if (result.unknown_cost_members) total += " (+ " + result.unknown_cost_members + " with unknown cost)";
+    if (planCalls) total += " + " + planUsage(planCalls);
+    if (otherUnknown > 0) total += " (+ " + otherUnknown + " with unknown cost)";
     $("run-total").textContent = total;
     $("results-section").hidden = false;
   }
@@ -318,13 +466,16 @@
         money(b.currency, b.confirm_above) + "). Run anyway?");
       if (!confirmed) return;
     }
+    const consent = needsConsent(req) && $("consent").checked;
+    if (needsConsent(req) && !consent) return;
     showMessage("");
     state.busy = true;
     updateButtons();
     resetSynthesis();
     renderPending(req);
     try {
-      const result = await api("/api/run", Object.assign({}, req, { confirmed: confirmed }));
+      const body = Object.assign({}, req, { confirmed: confirmed, allow_unknown_cost: consent });
+      const result = await api("/api/run", body);
       renderResults(result);
       setupSynthesis(req.task, result);
     } catch (error) {
@@ -332,6 +483,7 @@
       showMessage(error.message);
     } finally {
       state.busy = false;
+      $("consent").checked = false;  // consent is given per run
       invalidateEstimate();  // spend changed: a new run needs a fresh estimate
       refreshBudget();
     }
@@ -348,10 +500,11 @@
   const ICON_WRONG = "\u274c";
 
   const syn = {
-    material: null,      // { task, answers: [{provider, model, text}] }
+    material: null,      // { task, answers: [{provider, backend, model, text}] }
     runSettings: null,   // settings snapshot of the current synthesis
     seed: null,
     chair: null,         // { provider, model_id }
+    chairBackend: null,  // "api" | "cli"
     chairOptions: [],
     estimate: null,
     estimateSeq: 0,
@@ -384,8 +537,17 @@
     return shortMoney(currency, low) + "\u2013" + shortMoney(currency, high);
   }
 
-  function modelText(choice) {
-    return providerLabel(choice.provider) + " \u00b7 " + choice.model_id;
+  function modelText(choice, backend) {
+    return providerLabel(choice.provider) + " \u00b7 " + choice.model_id + (backend === "cli" ? " (subscription)" : "");
+  }
+
+  // Cost text of a CostEstimate: priced range and/or subscription call count.
+  function estimateText(currency, est) {
+    return costText(moneyRange(currency, est.total_low, est.total_high), hasPriced(est.lines), cliCalls(est.lines));
+  }
+
+  function synConsented() {
+    return $("syn-consent").checked;
   }
 
   function labelText(label) {
@@ -415,14 +577,16 @@
       answers: syn.material.answers,
       seed: syn.seed,
       chair: syn.chair,
+      chair_backend: syn.chair ? syn.chairBackend : null,
       review_tier: tier ? tier.value : "economy",
       extra_instructions: extra.trim() === "" ? null : extra,
+      allow_unknown_cost: synConsented(),
     };
   }
 
   function setSynBusy(busy) {
     syn.busy = busy;
-    for (const id of ["syn-instructions", "syn-chair"]) $(id).disabled = busy;
+    for (const id of ["syn-instructions", "syn-chair", "syn-consent"]) $(id).disabled = busy;
     for (const radio of document.querySelectorAll("input[name=syn-tier]")) radio.disabled = busy;
     for (const node of document.querySelectorAll("#syn-result input, #syn-result button")) {
       if (node.id !== "syn-reveal") node.disabled = busy;
@@ -443,6 +607,8 @@
     $("syn-decision").hidden = true;
     $("syn-result").hidden = true;
     $("syn-breakdown").hidden = true;
+    $("syn-consent-box").hidden = true;
+    $("syn-consent").checked = false;
     synMessage("");
     synStatus("");
   }
@@ -451,7 +617,7 @@
     resetSynthesis();
     const answers = result.members
       .filter((m) => m.error === null && typeof m.text === "string" && m.text.trim() !== "")
-      .map((m) => ({ provider: m.provider, model: m.model, text: m.text }));
+      .map((m) => ({ provider: m.provider, backend: m.backend, model: m.model, text: m.text }));
     $("synthesis-section").hidden = false;
     const enough = answers.length >= 2;
     $("syn-unavailable").hidden = enough;
@@ -463,27 +629,35 @@
     syn.material = { task: task, answers: answers };
     syn.seed = null;
     syn.chair = null;
+    syn.chairBackend = null;
     syn.reveal = false;
     buildChairOptions(answers);
     scheduleSynEstimate(0);
   }
 
   function buildChairOptions(answers) {
+    // A provider's calls all use the backend of its answer, so a chair of an
+    // answering provider is offered on that backend only.
     const options = [];
     const seen = new Set();
-    for (const a of answers) {
-      const key = a.provider + "/" + a.model;
-      if (seen.has(key)) continue;
+    const answered = {};
+    const add = (provider, modelId, backend, group) => {
+      const key = provider + "/" + modelId + "/" + backend;
+      if (seen.has(key)) return;
       seen.add(key);
-      options.push({ provider: a.provider, model_id: a.model, group: "Models above" });
+      options.push({ provider: provider, model_id: modelId, backend: backend, group: group });
+    };
+    for (const a of answers) {
+      answered[a.provider] = a.backend;
+      add(a.provider, a.model, a.backend, "Models above");
     }
     for (const p of state.providers) {
-      if (p.key_status === "not set") continue;
-      for (const m of p.models) {
-        const key = p.name + "/" + m.id;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        options.push({ provider: p.name, model_id: m.id, group: "Other models" });
+      const only = answered[p.name];
+      if (p.key_status !== "not set" && (!only || only === "api")) {
+        for (const m of p.models) add(p.name, m.id, "api", "Other models");
+      }
+      if (p.cli && p.cli.available && (!only || only === "cli")) {
+        for (const m of p.cli.models) add(p.name, m.id, "cli", "Other models");
       }
     }
     syn.chairOptions = options;
@@ -495,18 +669,20 @@
         groups[o.group] = el("optgroup", { label: o.group });
         select.append(groups[o.group]);
       }
-      groups[o.group].append(el("option", { value: String(index), text: modelText(o) }));
+      groups[o.group].append(el("option", { value: String(index), text: modelText(o, o.backend) }));
     }
   }
 
-  function selectChair(choice) {
-    const index = syn.chairOptions.findIndex((o) => o.provider === choice.provider && o.model_id === choice.model_id);
+  function selectChair(choice, backend) {
+    const index = syn.chairOptions.findIndex((o) =>
+      o.provider === choice.provider && o.model_id === choice.model_id && o.backend === backend);
     if (index >= 0) $("syn-chair").value = String(index);
   }
 
   function onChairChange() {
     const o = syn.chairOptions[Number($("syn-chair").value)];
     syn.chair = o ? { provider: o.provider, model_id: o.model_id } : null;
+    syn.chairBackend = o ? o.backend : null;
     scheduleSynEstimate(0);
   }
 
@@ -529,8 +705,10 @@
       syn.currency = est.currency;
       if (!syn.chair) {
         syn.chair = est.chair;
-        selectChair(est.chair);
+        syn.chairBackend = est.chair_backend;
+        selectChair(est.chair, est.chair_backend);
       }
+      $("syn-consent-box").hidden = !est.cli_calls;
       renderSynBreakdown(est);
       if (!syn.busy) {
         synStatus("");
@@ -545,10 +723,15 @@
   }
 
   function stageDescription(stage, est) {
-    if (stage === "agreement") return "judge " + modelText(est.judge);
-    if (stage === "chair") return "chair " + modelText(est.chair);
-    const models = est.reviewers.map((r) => r.model.model_id);
+    if (stage === "agreement") return "judge " + modelText(est.judge, est.chair_backend);
+    if (stage === "chair") return "chair " + modelText(est.chair, est.chair_backend);
+    const models = est.reviewers.map((r) => r.model.model_id + (r.backend === "cli" ? " (subscription)" : ""));
     return est.reviewers.length + " reviewer(s): " + Array.from(new Set(models)).join(", ");
+  }
+
+  function synTotalText(est) {
+    const priced = est.stages.some((s) => hasPriced(s.estimate.lines));
+    return costText(moneyRange(est.currency, est.total_low, est.total_high), priced, est.cli_calls);
   }
 
   function renderSynBreakdown(est) {
@@ -559,11 +742,11 @@
         el("tbody", {}, est.stages.map((s) => el("tr", {}, [
           el("td", { text: STAGE_TITLES[s.stage] || s.stage }),
           el("td", { text: stageDescription(s.stage, est) }),
-          el("td", { class: "num", text: moneyRange(est.currency, s.estimate.total_low, s.estimate.total_high) }),
+          el("td", { class: "num", text: estimateText(est.currency, s.estimate) }),
         ]))),
         el("tfoot", {}, el("tr", {}, [
           el("td", { text: "Total" }), el("td", {}),
-          el("td", { class: "num", text: moneyRange(est.currency, est.total_low, est.total_high) }),
+          el("td", { class: "num", text: synTotalText(est) }),
         ])),
       ]),
       el("p", { class: "muted", text: "Review can be skipped after the agreement check. Estimates assume no prompt-cache discount." +
@@ -576,9 +759,10 @@
     const btn = $("syn-btn");
     const est = syn.estimate;
     let label = "AI synthesize";
-    if (est) label += " (\u2248 " + moneyRange(est.currency, est.total_low, est.total_high) + ")";
+    if (est) label += " (\u2248 " + synTotalText(est) + ")";
     btn.textContent = label;
-    btn.disabled = syn.busy || !syn.material || !est || est.budget.refused;
+    const consented = !est || !est.cli_calls || synConsented();
+    btn.disabled = syn.busy || !syn.material || !est || est.budget.refused || !consented;
   }
 
   function addCosts(result) {
@@ -630,7 +814,9 @@
 
   function showSkipDecision(step) {
     const ratio = Math.round(step.agreement.ratio * 100);
-    const saving = shortMoney(step.review_estimate.currency || syn.currency, step.review_estimate.total_high);
+    const review = step.review_estimate;
+    const saving = costText(shortMoney(review.currency || syn.currency, review.total_high),
+      hasPriced(review.lines), cliCalls(review.lines));
     const box = $("syn-decision");
     box.replaceChildren(
       el("p", { class: "decision-title", text: "The answers largely agree (agreement " + ratio + "%)." }),
@@ -740,6 +926,8 @@
     const ratio = syn.agreement && syn.agreement.ratio !== null && syn.agreement.ratio !== undefined
       ? Math.round(syn.agreement.ratio * 100) + "%" : "n/a";
     const total = syn.costs.reduce((sum, c) => sum + Number(c.cost), 0);
+    const unknown = syn.costs.reduce((sum, c) => sum + c.unknown_cost_calls, 0);
+    const totalText = shortMoney(syn.currency, total) + (unknown ? " + " + planUsage(unknown) : "");
 
     const reveal = el("label", { class: "reveal" }, [
       el("input", { type: "checkbox", id: "syn-reveal", checked: syn.reveal, onchange: (e) => { syn.reveal = e.target.checked; renderSynResult(); } }),
@@ -752,8 +940,8 @@
         el("div", { class: "final-meta" }, [
           el("span", { text: "Agreement " + ratio }),
           el("span", { text: syn.reviewSkipped ? "Review skipped" : "Reviewed" }),
-          el("span", { text: "Chair " + modelText(syn.runSettings.chair) }),
-          el("span", { text: "Cost " + shortMoney(syn.currency, total) }),
+          el("span", { text: "Chair " + modelText(syn.runSettings.chair, syn.runSettings.chair_backend) }),
+          el("span", { text: "Cost " + totalText }),
         ]),
       ]),
       renderMarkdown(synthesis.final_text),
@@ -761,7 +949,7 @@
 
     const side = el("div", { class: "synth-side" }, [
       renderRanking(),
-      renderCosts(total),
+      renderCosts(total, unknown),
       el("div", { class: "side-block" }, [
         el("h4", { text: "Anonymous labels" }), reveal,
         syn.reveal ? el("ul", { class: "plain" }, syn.labels.map((l) =>
@@ -791,16 +979,25 @@
     return block;
   }
 
-  function renderCosts(total) {
+  // Known cost on the first line, subscription calls (if any) on a second one.
+  function costCell(cost, calls, unknown) {
+    if (unknown && unknown === calls) return el("td", { class: "num", text: planUsage(unknown) });
+    return el("td", { class: "num" }, [
+      shortMoney(syn.currency, cost),
+      unknown ? el("div", { class: "muted", text: "+ " + planUsage(unknown) }) : null,
+    ]);
+  }
+
+  function renderCosts(total, unknown) {
     return el("div", { class: "side-block" }, [
       el("h4", { text: "Cost" }),
       el("table", { class: "cost-table" }, [
         el("tbody", {}, syn.costs.map((c) => el("tr", {}, [
           el("td", { text: (STAGE_TITLES[c.stage] || c.stage) + (c.resynthesis ? " (regenerated)" : "") }),
           el("td", { class: "num muted", text: c.calls + " call(s)" }),
-          el("td", { class: "num", text: shortMoney(syn.currency, c.cost) + (c.unknown_cost_calls ? " +?" : "") }),
+          costCell(c.cost, c.calls, c.unknown_cost_calls),
         ]))),
-        el("tfoot", {}, el("tr", {}, [el("td", { text: "Total" }), el("td", {}), el("td", { class: "num", text: shortMoney(syn.currency, total) })])),
+        el("tfoot", {}, el("tr", {}, [el("td", { text: "Total" }), el("td", {}), costCell(total, -1, unknown)])),
       ]),
     ]);
   }
@@ -901,6 +1098,7 @@
       reviews: syn.reviews,
       previous: syn.outcome.synthesis,
       rulings: currentRulings(),
+      allow_unknown_cost: synConsented(),
     });
   }
 
@@ -928,13 +1126,17 @@
     const btn = $("resynth-btn");
     if (!btn) return;
     const est = syn.resynthEstimate;
-    btn.textContent = "Regenerate final answer" +
-      (est ? " (\u2248 " + shortMoney(est.estimate.currency || syn.currency, est.estimate.total_high) + ")" : "");
+    const currency = est ? est.estimate.currency || syn.currency : syn.currency;
+    btn.textContent = "Regenerate final answer" + (est
+      ? " (\u2248 " + costText(shortMoney(currency, est.estimate.total_high), hasPriced(est.estimate.lines), est.budget.cli_calls) + ")"
+      : "");
     const rulings = currentRulings();
-    btn.disabled = syn.busy || !est || est.budget.refused || rulings.length === 0;
+    const consented = !est || !est.budget.cli_calls || synConsented();
+    btn.disabled = syn.busy || !est || est.budget.refused || rulings.length === 0 || !consented;
     const hint = $("resynth-hint");
     if (!hint) return;
     if (est && est.budget.refused) hint.textContent = "Refused by the budget: " + (est.budget.refusal_reason || "over budget");
+    else if (!consented) hint.textContent = "Tick the consent box above to use subscription models.";
     else if (rulings.length === 0) hint.textContent = "Pick a position or include an insight to regenerate.";
     else hint.textContent = rulings.length + " change(s) selected.";
   }
@@ -974,6 +1176,7 @@
   function initSynthesis() {
     $("syn-btn").addEventListener("click", onSynthesize);
     $("syn-chair").addEventListener("change", onChairChange);
+    $("syn-consent").addEventListener("change", () => { updateSynButton(); updateResynthButton(); });
     $("syn-instructions").addEventListener("input", () => scheduleSynEstimate(500));
     for (const radio of document.querySelectorAll("input[name=syn-tier]")) {
       radio.addEventListener("change", () => scheduleSynEstimate(0));
@@ -986,19 +1189,9 @@
     $("task").addEventListener("input", invalidateEstimate);
     $("estimate-btn").addEventListener("click", onEstimate);
     $("run-btn").addEventListener("click", onRun);
+    $("consent").addEventListener("change", updateButtons);
     initSynthesis();
-    try {
-      const data = await api("/api/providers");
-      state.providers = data.providers;
-      state.defaultMaxTokens = data.default_max_output_tokens;
-      state.budget = data.budget;
-      renderBudgetSummary();
-      renderProviders();
-    } catch (error) {
-      $("providers").replaceChildren(el("p", { class: "muted", text: "Could not load providers." }));
-      showMessage(error.message);
-    }
-    updateButtons();
+    await loadProviders(false);
   }
 
   init();

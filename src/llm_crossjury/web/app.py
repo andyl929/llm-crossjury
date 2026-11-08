@@ -3,10 +3,14 @@
 Serves one static page (vanilla HTML/CSS/JS, no build step) and a small JSON API:
 
 * ``GET /api/providers``: the providers, whether each key is set (never any part of
-  its value), the usable models from the registry, and the effective budget.
-* ``POST /api/estimate``: the cost range and the budget verdict (confirmation needed,
-  or refused) for the selections.
-* ``POST /api/run``: runs the comparison and returns every member's result.
+  its value), the usable models per backend (``api`` = API key, ``cli`` =
+  "subscription", the vendor CLI the user signed in to), the CLI status from each
+  CLI provider's ``check()`` (run concurrently on request, cached briefly, never at
+  startup; ``?refresh=true`` re-checks), and the effective budget.
+* ``POST /api/estimate``: the cost range of the priced calls, the number of CLI calls
+  (unknown cost) and the budget verdict (confirmation needed, or refused).
+* ``POST /api/run``: runs the comparison and returns every member's result. A run with
+  CLI members needs ``allow_unknown_cost`` (409 ``consent_required`` otherwise).
 * ``POST /api/synthesis/{estimate,agreement,finish,resynthesize-estimate,resynthesize}``:
   the stateless AI synthesis upgrade of a finished comparison (see
   :mod:`llm_crossjury.core.synthesis_service`). The client posts the step-1 material
@@ -20,7 +24,11 @@ cross-origin POSTs.
 
 from __future__ import annotations
 
+import asyncio
+import os
+import time
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from importlib import resources
@@ -38,16 +46,19 @@ from llm_crossjury.core.compare_service import (
     BudgetStatus,
     CompareDeps,
     CompareResult,
+    ConsentRequiredError,
     Selection,
     SelectionError,
     budget_status,
     estimate_compare,
     key_is_set,
+    provider_names,
     run_compare,
     usable_models,
 )
 from llm_crossjury.core.cost.estimate import CostEstimate
 from llm_crossjury.core.cost.pricing import PricingError
+from llm_crossjury.core.providers.base import Backend, ProviderStatus
 from llm_crossjury.core.registry.resolver import ResolutionError
 from llm_crossjury.core.synthesis_service import (
     AgreementStepResult,
@@ -75,6 +86,70 @@ PROVIDER_LABELS: dict[str, str] = {
     "gemini": "Google Gemini",
     "xai": "xAI",
 }
+
+CLI_CHECK_TTL_S = 30.0
+"""How long a CLI ``check()`` result is reused before it is run again."""
+
+CLI_CHECK_TIMEOUT_S = 15.0
+"""A CLI check that takes longer is reported as not responding."""
+
+MAX_STATUS_DETAIL_CHARS = 300
+
+
+@dataclass(frozen=True)
+class CliProduct:
+    """Display text for a provider's subscription backend (not model facts)."""
+
+    product: str
+    command: str
+    experimental: bool
+    install: tuple[str, ...]
+    """Official install commands, one per platform or method."""
+    sign_in: str
+
+
+CLI_PRODUCTS: dict[str, CliProduct] = {
+    "anthropic": CliProduct(
+        product="Claude Code",
+        command="claude",
+        experimental=False,
+        install=(
+            "macOS/Linux/WSL: curl -fsSL https://claude.ai/install.sh | bash",
+            "Windows PowerShell: irm https://claude.ai/install.ps1 | iex",
+            "npm: npm install -g @anthropic-ai/claude-code",
+        ),
+        sign_in="Run claude once in a terminal and sign in with your Claude account.",
+    ),
+    "openai": CliProduct(
+        product="Codex CLI",
+        command="codex",
+        experimental=False,
+        install=("npm: npm install -g @openai/codex",),
+        sign_in="Run codex login in a terminal and choose Sign in with ChatGPT.",
+    ),
+    "xai": CliProduct(
+        product="Grok Build",
+        command="grok",
+        experimental=True,
+        install=(
+            "macOS/Linux/WSL: curl -fsSL https://x.ai/cli/install.sh | bash",
+            "Windows PowerShell: irm https://x.ai/cli/install.ps1 | iex",
+        ),
+        sign_in="Run grok once in a terminal and sign in with your xAI account.",
+    ),
+}
+"""Subscription backends offered in the UI. Install and sign-in text is shown verbatim."""
+
+SUBSCRIPTION_UNAVAILABLE: dict[str, str] = {
+    "gemini": "Gemini requires an API key (Google AI Studio).",
+}
+"""Providers without a subscription option, and why (Google forbids third-party use of
+consumer plans)."""
+
+CONSENT_TEXT = (
+    "I understand: cost is unknown, calls count against my plan's usage limits, "
+    "and this mode is experimental"
+)
 
 MAX_TASK_CHARS = 200_000
 MAX_ANSWER_CHARS = 400_000
@@ -119,6 +194,24 @@ class ModelOption(_Frozen):
     aliases: tuple[str, ...]
 
 
+class CliStatus(_Frozen):
+    """The subscription (``cli``) backend of one provider."""
+
+    product: str
+    command: str
+    experimental: bool
+    available: bool
+    """The CLI was found and answered its version/status check."""
+    detail: str
+    """Check result (redacted, never credentials)."""
+    version: str | None
+    install: tuple[str, ...]
+    sign_in: str
+    models: tuple[ModelOption, ...]
+    """Registry entries that list the ``cli`` backend and have ``cli_flags``."""
+    default_model: str | None
+
+
 class ProviderInfo(_Frozen):
     """One provider as shown in the UI."""
 
@@ -128,8 +221,13 @@ class ProviderInfo(_Frozen):
     """Name of the environment variable (never its value)."""
     key_status: KeyStatus
     models: tuple[ModelOption, ...]
+    """Usable ``api`` models (verified and priced)."""
     default_model: str | None
     """The ``balanced`` alias target if usable, else the first usable model."""
+    cli: CliStatus | None
+    """The subscription backend, or ``None`` if not offered for this provider."""
+    subscription_note: str | None
+    """Why no subscription backend is offered, when there is a reason to show."""
 
 
 class BudgetInfo(_Frozen):
@@ -147,6 +245,8 @@ class ProvidersResponse(_Frozen):
     providers: tuple[ProviderInfo, ...]
     default_max_output_tokens: int
     budget: BudgetInfo
+    consent_text: str
+    """The consent statement the UI shows next to the checkbox for CLI members."""
 
 
 class CompareRequest(_Frozen):
@@ -157,19 +257,26 @@ class CompareRequest(_Frozen):
 class RunRequest(CompareRequest):
     confirmed: bool = False
     """The user confirmed a run whose high estimate exceeds ``confirm_above``."""
+    allow_unknown_cost: bool = False
+    """The user ticked the consent box for subscription (CLI) members."""
 
 
 class EstimateLineOut(_Frozen):
     provider: str
+    backend: Backend
     model: str
+    calls: int
     cost_low: Decimal | None
     cost_high: Decimal | None
+    """``None`` for ``cli`` calls (plan usage, unknown cost)."""
 
 
 class EstimateResponse(_Frozen):
     currency: str
     total_low: Decimal
     total_high: Decimal
+    """Range of the priced (``api``) calls only."""
+    cli_calls: int
     lines: tuple[EstimateLineOut, ...]
     warnings: tuple[str, ...]
     assumptions: tuple[str, ...]
@@ -220,9 +327,10 @@ def _key_status(key_env: str | None) -> KeyStatus:
     return "set" if key_is_set(key_env) else "not set"
 
 
-def _provider_info(name: str, deps: CompareDeps) -> ProviderInfo:
-    key_env = deps.key_envs.get(name)
-    models = usable_models(name, deps)
+def _model_options(
+    name: str, deps: CompareDeps, backend: Backend
+) -> tuple[tuple[ModelOption, ...], str | None]:
+    models = usable_models(name, deps, backend)
     options = tuple(
         ModelOption(
             id=m.model_id,
@@ -234,6 +342,48 @@ def _provider_info(name: str, deps: CompareDeps) -> ProviderInfo:
     default = next((m.model_id for m in models if "balanced" in m.aliases), None)
     if default is None and options:
         default = options[0].id
+    return options, default
+
+
+def _redact_detail(text: str, deps: CompareDeps) -> str:
+    """Remove any set API key value from a status text and bound its length."""
+    for env in deps.key_envs.values():
+        if key_is_set(env):
+            secret = os.environ.get(env, "").strip()
+            text = text.replace(secret, "[redacted]")
+    if len(text) > MAX_STATUS_DETAIL_CHARS:
+        text = text[: MAX_STATUS_DETAIL_CHARS - 3] + "..."
+    return text
+
+
+def _cli_status(name: str, deps: CompareDeps, status: ProviderStatus | None) -> CliStatus | None:
+    product = CLI_PRODUCTS.get(name)
+    if product is None or (name, Backend.CLI) not in deps.providers:
+        return None
+    options, default = _model_options(name, deps, Backend.CLI)
+    available = status is not None and status.available
+    detail = "Not checked yet." if status is None else _redact_detail(status.detail, deps)
+    version = None if status is None or status.version is None else status.version[:80]
+    return CliStatus(
+        product=product.product,
+        command=product.command,
+        experimental=product.experimental,
+        available=available,
+        detail=detail,
+        version=version,
+        install=product.install,
+        sign_in=product.sign_in,
+        models=options,
+        default_model=default,
+    )
+
+
+def _provider_info(
+    name: str, deps: CompareDeps, cli_checks: dict[str, ProviderStatus]
+) -> ProviderInfo:
+    key_env = deps.key_envs.get(name)
+    options, default = _model_options(name, deps, Backend.API)
+    cli = _cli_status(name, deps, cli_checks.get(name))
     return ProviderInfo(
         name=name,
         label=PROVIDER_LABELS.get(name, name),
@@ -241,7 +391,53 @@ def _provider_info(name: str, deps: CompareDeps) -> ProviderInfo:
         key_status=_key_status(key_env),
         models=options,
         default_model=default,
+        cli=cli,
+        subscription_note=None if cli is not None else SUBSCRIPTION_UNAVAILABLE.get(name),
     )
+
+
+class CliCheckCache:
+    """Runs CLI ``check()`` calls concurrently and reuses results for a short time.
+
+    Checks run only when the provider list is requested, never at startup. A check
+    that raises or times out is reported as unavailable with the exception type only.
+    """
+
+    def __init__(self, ttl_s: float = CLI_CHECK_TTL_S) -> None:
+        self._ttl = ttl_s
+        self._results: dict[str, tuple[float, ProviderStatus]] = {}
+        self._lock = asyncio.Lock()
+
+    async def statuses(self, deps: CompareDeps, *, refresh: bool) -> dict[str, ProviderStatus]:
+        """Return ``provider -> status`` for every ``cli`` provider in ``deps``."""
+        names = [name for name, backend in deps.providers if backend is Backend.CLI]
+        async with self._lock:
+            now = time.monotonic()
+            stale = [
+                n
+                for n in names
+                if refresh or n not in self._results or now - self._results[n][0] > self._ttl
+            ]
+            if stale:
+                fresh = await asyncio.gather(*(self._check(n, deps) for n in stale))
+                done = time.monotonic()
+                for n, status in zip(stale, fresh, strict=True):
+                    self._results[n] = (done, status)
+            return {n: self._results[n][1] for n in names}
+
+    @staticmethod
+    async def _check(name: str, deps: CompareDeps) -> ProviderStatus:
+        provider = deps.providers[(name, Backend.CLI)]
+        try:
+            return await asyncio.wait_for(provider.check(), timeout=CLI_CHECK_TIMEOUT_S)
+        except TimeoutError:
+            detail = "The CLI did not respond to its version check in time."
+        except Exception as exc:  # a broken adapter must not break the provider list
+            # Only the type name: an exception message is not guaranteed secret-free.
+            detail = f"The CLI check failed ({type(exc).__name__})."
+        return ProviderStatus(
+            provider=name, backend=Backend.CLI, available=False, detail=detail, version=None
+        )
 
 
 def _budget_info(deps: CompareDeps) -> BudgetInfo:
@@ -266,6 +462,10 @@ def _check_synthesis_size(req: SynthesisRequest) -> None:
         )
     if any(len(a.text) > MAX_ANSWER_CHARS for a in req.answers):
         raise SelectionError(f"An answer is longer than {MAX_ANSWER_CHARS} characters.")
+
+
+def _consent_error(exc: ConsentRequiredError, status: BudgetStatus | None = None) -> JSONResponse:
+    return _error(409, "consent_required", str(exc), status)
 
 
 def _confirmation_error(status: BudgetStatus) -> JSONResponse:
@@ -296,6 +496,8 @@ def _add_synthesis_routes(app: FastAPI, deps: Callable[[], CompareDeps]) -> None
         _check_synthesis_size(body)
         d = deps()
         status = estimate_synthesis(body, d).budget
+        if status.cli_calls and not body.allow_unknown_cost:
+            return _consent_error(ConsentRequiredError(status.cli_calls), status)
         if status.needs_confirmation and not body.confirmed:
             return _confirmation_error(status)
         return await run_agreement_step(body, d)
@@ -321,6 +523,8 @@ def _add_synthesis_routes(app: FastAPI, deps: Callable[[], CompareDeps]) -> None
         _check_synthesis_size(body)
         d = deps()
         status = budget_status(estimate_resynthesis(body, d), d)
+        if status.cli_calls and not body.allow_unknown_cost:
+            return _consent_error(ConsentRequiredError(status.cli_calls), status)
         if status.needs_confirmation and not body.confirmed:
             return _confirmation_error(status)
         return await run_resynthesis(body, d)
@@ -349,6 +553,7 @@ def create_app(
     )
     hosts = frozenset(h.strip("[]").lower() for h in allowed_hosts)
     cache: list[CompareDeps] = []
+    cli_checks = CliCheckCache()
 
     def deps() -> CompareDeps:
         if not cache:
@@ -395,6 +600,10 @@ def create_app(
     async def _pricing_error(request: Request, exc: PricingError) -> JSONResponse:
         return _error(400, "pricing", f"Pricing refused the run: {exc}")
 
+    @app.exception_handler(ConsentRequiredError)
+    async def _consent_required(request: Request, exc: ConsentRequiredError) -> JSONResponse:
+        return _consent_error(exc)
+
     @app.exception_handler(BudgetRefusedError)
     async def _budget_error(request: Request, exc: BudgetRefusedError) -> JSONResponse:
         return _error(409, "budget_refused", str(exc), exc.status)
@@ -421,12 +630,14 @@ def create_app(
         return page("/app.css")
 
     @app.get("/api/providers")
-    async def providers() -> ProvidersResponse:
+    async def providers(refresh: bool = False) -> ProvidersResponse:
         d = deps()
+        checks = await cli_checks.statuses(d, refresh=refresh)
         return ProvidersResponse(
-            providers=tuple(_provider_info(name, d) for name in d.providers),
+            providers=tuple(_provider_info(name, d, checks) for name in provider_names(d)),
             default_max_output_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
             budget=_budget_info(d),
+            consent_text=CONSENT_TEXT,
         )
 
     @app.post("/api/estimate")
@@ -434,14 +645,18 @@ def create_app(
         d = deps()
         est = await estimate_compare(body.task, body.selections, d)
         warnings = tuple(w for r in est.resolved for w in r.warnings)
+        status = budget_status(est, d)
         return EstimateResponse(
-            currency=est.currency,
+            currency=est.currency or d.budget.currency,
             total_low=est.total_low,
             total_high=est.total_high,
+            cli_calls=status.cli_calls,
             lines=tuple(
                 EstimateLineOut(
                     provider=line.provider,
+                    backend=line.backend,
                     model=line.model,
+                    calls=line.calls,
                     cost_low=line.cost_low,
                     cost_high=line.cost_high,
                 )
@@ -449,13 +664,15 @@ def create_app(
             ),
             warnings=warnings,
             assumptions=est.assumptions,
-            budget=budget_status(est, d),
+            budget=status,
         )
 
     @app.post("/api/run", response_model=None)
     async def run(body: RunRequest) -> CompareResult | JSONResponse:
         d = deps()
         status = budget_status(await estimate_compare(body.task, body.selections, d), d)
+        if status.cli_calls and not body.allow_unknown_cost:
+            return _consent_error(ConsentRequiredError(status.cli_calls), status)
         if status.refused:
             raise BudgetRefusedError(status.refusal_reason or "Refused by the budget.", status)
         if status.needs_confirmation and not body.confirmed:
@@ -466,7 +683,9 @@ def create_app(
                 f"confirmation threshold ({status.currency} {status.confirm_above}).",
                 status,
             )
-        return await run_compare(body.task, body.selections, d)
+        return await run_compare(
+            body.task, body.selections, d, allow_unknown_cost=body.allow_unknown_cost
+        )
 
     _add_synthesis_routes(app, deps)
     app.include_router(

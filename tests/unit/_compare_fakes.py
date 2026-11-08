@@ -21,12 +21,14 @@ from llm_crossjury.core.providers.base import (
     CompletionRequest,
     CompletionResult,
     Provider,
+    ProviderStatus,
     ReasoningEffort,
     Usage,
 )
 from llm_crossjury.core.providers.mock import MockProvider
 from llm_crossjury.core.registry.resolver import ResolutionError, ResolvedModel, Role
 from llm_crossjury.core.registry.schema import (
+    CliFlags,
     ModelEntry,
     Pricing,
     ReasoningControl,
@@ -34,6 +36,8 @@ from llm_crossjury.core.registry.schema import (
 )
 
 PROVIDERS = ("anthropic", "openai", "gemini", "xai")
+CLI_PROVIDERS = ("anthropic", "openai", "xai")
+"""Providers with a fake subscription (cli) backend in :func:`make_deps`."""
 PER_OUTPUT_TOKEN = Decimal("0.00001")
 """Fake estimator rate: cost = output tokens x this (high = 4096 tokens -> 0.04096)."""
 FIXED_CALL_COST = Decimal("0.01")
@@ -58,6 +62,9 @@ def make_entry(
     backends: tuple[Backend, ...] = (Backend.API,),
     max_output: int | None = None,
 ) -> ModelEntry:
+    cli_flags = (
+        CliFlags(model=("--model", "{model}"), reasoning=None) if Backend.CLI in backends else None
+    )
     return ModelEntry(
         provider=provider,
         model_id=model_id,
@@ -65,7 +72,7 @@ def make_entry(
         reasoning_control=ReasoningControl(
             type=ReasoningControlType.NONE, parameter=None, allowed=None, mapping=None
         ),
-        cli_flags=None,
+        cli_flags=cli_flags,
         context_window=None,
         max_output=max_output,
         structured_output=None,
@@ -144,6 +151,9 @@ class FakePricing:
 
 
 class FakeEstimator:
+    """Prices every non-cli call by output tokens; cli calls are unpriced (as the real
+    estimator does)."""
+
     def estimate(self, plan: list[CallPlan], resolved: list[ResolvedModel]) -> CostEstimate:
         lines = tuple(
             EstimateLine(
@@ -159,8 +169,12 @@ class FakeEstimator:
                 reasoning=p.reasoning,
                 reasoning_tokens_low=0,
                 reasoning_tokens_high=0,
-                cost_low=p.expected_output_tokens_low * PER_OUTPUT_TOKEN,
-                cost_high=p.expected_output_tokens_high * PER_OUTPUT_TOKEN,
+                cost_low=None
+                if p.backend is Backend.CLI
+                else p.expected_output_tokens_low * PER_OUTPUT_TOKEN,
+                cost_high=None
+                if p.backend is Backend.CLI
+                else p.expected_output_tokens_high * PER_OUTPUT_TOKEN,
             )
             for p in plan
         )
@@ -170,7 +184,7 @@ class FakeEstimator:
             lines=lines,
             total_low=sum((line.cost_low or Decimal(0) for line in lines), Decimal(0)),
             total_high=sum((line.cost_high or Decimal(0) for line in lines), Decimal(0)),
-            unpriced_calls=0,
+            unpriced_calls=sum(1 for line in lines if line.cost_low is None),
             assumptions=("fake estimator",),
         )
 
@@ -234,6 +248,58 @@ class GatedProvider(MockProvider):
         return await super().complete(request)
 
 
+class FakeCliProvider(MockProvider):
+    """A subscription (``cli``) provider: reports unknown usage, like a real CLI.
+
+    Args:
+        name: Provider id.
+        available: What :meth:`check` reports.
+        detail: The check detail text.
+        check_error: If set, :meth:`check` raises it.
+        responder: Response text factory (default: an echo).
+    """
+
+    backend = Backend.CLI
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        available: bool = True,
+        detail: str = "fake cli 1.0",
+        check_error: Exception | None = None,
+        responder: Callable[[CompletionRequest], str] | None = None,
+    ) -> None:
+        super().__init__(name, responder or (lambda req: f"{name} cli answer"))
+        self.available = available
+        self.detail = detail
+        self.check_error = check_error
+        self.checks = 0
+
+    async def complete(self, request: CompletionRequest) -> CompletionResult:
+        result = await super().complete(request)
+        unknown = Usage(
+            input_tokens=None,
+            cached_input_tokens=None,
+            cache_write_tokens=None,
+            output_tokens=None,
+            reasoning_tokens=None,
+        )
+        return result.model_copy(update={"usage": unknown, "latency_s": None})
+
+    async def check(self) -> ProviderStatus:
+        self.checks += 1
+        if self.check_error is not None:
+            raise self.check_error
+        return ProviderStatus(
+            provider=self.name,
+            backend=Backend.CLI,
+            available=self.available,
+            detail=self.detail,
+            version="1.0" if self.available else None,
+        )
+
+
 def raising_provider(name: str, exc: Exception) -> MockProvider:
     def responder(req: CompletionRequest) -> str:
         raise exc
@@ -248,6 +314,7 @@ def fixed_cost(usage: Usage, price: Pricing) -> Decimal | None:
 def make_deps(
     *,
     providers: Mapping[str, Provider] | None = None,
+    cli_providers: Mapping[str, Provider] | None = None,
     key_envs: Mapping[str, str] | None = None,
     budget: BudgetConfig | None = None,
     ledger: FakeLedger | None = None,
@@ -255,16 +322,26 @@ def make_deps(
     extra_models: list[ModelEntry] | None = None,
 ) -> CompareDeps:
     """Deps with one priced model per provider (``<provider>-model``, alias ``balanced``)
-    plus one unpriced model per provider (``<provider>-unpriced``)."""
+    plus one unpriced model per provider (``<provider>-unpriced``) and one cli-only
+    model per :data:`CLI_PROVIDERS` entry (``<provider>-cli``, unpriced).
+
+    ``providers`` are keyed by name and registered on the ``api`` backend;
+    ``cli_providers`` (default: none) on the ``cli`` backend.
+    """
     models = [make_entry(p, f"{p}-model", max_output=8192) for p in PROVIDERS]
     models += [make_entry(p, f"{p}-unpriced") for p in PROVIDERS]
+    models += [make_entry(p, f"{p}-cli", backends=(Backend.CLI,)) for p in CLI_PROVIDERS]
     models += extra_models or []
     aliases: dict[tuple[str, str], str | None] = {}
     for p in PROVIDERS:
         aliases[(p, "balanced")] = f"{p}-model"
         aliases[(p, "fast")] = None
+    api = providers if providers is not None else {p: echo_provider(p) for p in PROVIDERS}
+    keyed: dict[tuple[str, Backend], Provider] = {(n, Backend.API): p for n, p in api.items()}
+    for name, provider in (cli_providers or {}).items():
+        keyed[(name, Backend.CLI)] = provider
     return CompareDeps(
-        providers=providers if providers is not None else {p: echo_provider(p) for p in PROVIDERS},
+        providers=keyed,
         key_envs=key_envs or {},
         registry=FakeRegistry(models),
         resolver=FakeResolver(aliases),

@@ -7,13 +7,18 @@ can pass fakes; :func:`build_default_deps` is the single place with the real wir
 Flow of :func:`run_compare`:
 
 1. Validate the selections, resolve each model (reasoning is always ``default`` in
-   this MVP), and look up its verified price. A missing price refuses the run.
-2. Estimate the run and refuse it if the high estimate exceeds the run limit or the
-   remaining daily budget (SPEC §5).
-3. Call every member concurrently. Before each call the ledger is checked with that
-   call's high estimate and the amount is reserved; every completed call is recorded
-   with its computed cost. A failing member (missing key, vendor error, budget stop)
-   becomes an error entry and never fails the whole run.
+   this MVP), and look up its verified price. A missing price refuses an ``api``
+   member. A ``cli`` member (the vendor CLI the user signed in to, "subscription")
+   needs no price: its cost is unknown (ADR 0002, ADR 0003).
+2. A run with any ``cli`` member needs the user's explicit consent
+   (``allow_unknown_cost``), otherwise :class:`ConsentRequiredError` is raised.
+3. Estimate the run and refuse it if the high estimate of the priced (``api``) part
+   exceeds the run limit or the remaining daily budget (SPEC §5).
+4. Call every member concurrently. Before each ``api`` call the ledger is checked with
+   that call's high estimate and the amount is reserved; every completed call (``cli``
+   calls too, with ``cost=None`` and their duration) is recorded. A failing member
+   (missing key, CLI not found, vendor error, budget stop) becomes an error entry and
+   never fails the whole run.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -106,6 +111,17 @@ class SelectionError(CompareError, ValueError):
     """The task or the member selections are invalid."""
 
 
+class ConsentRequiredError(CompareError):
+    """A ``cli`` member was selected without consent to unknown cost (ADR 0003)."""
+
+    def __init__(self, cli_calls: int) -> None:
+        super().__init__(
+            f"The run makes {cli_calls} subscription (CLI) call(s) with unknown cost. "
+            "Confirm that the calls count against your plan's usage limits."
+        )
+        self.cli_calls = cli_calls
+
+
 class BudgetRefusedError(CompareError):
     """The run is refused before any call because it could exceed a budget limit."""
 
@@ -122,12 +138,15 @@ class _Frozen(BaseModel):
 
 
 class Selection(_Frozen):
-    """One member picked by the user: a provider and a model, plus product settings.
+    """One member picked by the user: a provider, a backend and a model, plus product
+    settings.
 
     Reasoning is always ``default`` in this MVP.
     """
 
     provider: str = Field(min_length=1)
+    backend: Backend = Backend.API
+    """``api`` (API key) or ``cli`` (the vendor CLI the user signed in to)."""
     model: str = Field(min_length=1)
     """A concrete registry ``model_id`` or an alias (``fast`` | ``balanced`` | ``best``)."""
     temperature: float | None = Field(default=None, ge=0)
@@ -139,6 +158,7 @@ class MemberResult(_Frozen):
     """Outcome of one member call. Exactly one of ``text`` and ``error`` is set."""
 
     provider: str
+    backend: Backend
     model: str
     """Resolved model id."""
     requested_model: str
@@ -162,7 +182,7 @@ class CompareResult(_Frozen):
     total_cost: Decimal
     """Sum of known member costs."""
     unknown_cost_members: int
-    """Completed calls whose cost could not be computed."""
+    """Completed calls whose cost could not be computed (every ``cli`` call)."""
 
 
 class BudgetStatus(_Frozen):
@@ -176,6 +196,9 @@ class BudgetStatus(_Frozen):
     daily_remaining: Decimal
     estimate_low: Decimal
     estimate_high: Decimal
+    """Range of the priced (``api``) calls only."""
+    cli_calls: int = 0
+    """Calls on the ``cli`` backend: unknown cost, counted against the user's plan."""
     needs_confirmation: bool
     """The high estimate exceeds ``confirm_above`` (and the run is not refused)."""
     refused: bool
@@ -264,9 +287,10 @@ class CompareDeps:
     """Everything compare mode needs, injected so tests can use fakes.
 
     Attributes:
-        providers: Provider objects by provider id.
-        key_envs: Provider id -> name of the environment variable holding its key.
-            Providers without an entry need no key (e.g. mocks).
+        providers: Provider objects by ``(provider id, backend)``.
+        key_envs: Provider id -> name of the environment variable holding its
+            ``api`` key. Providers without an entry need no key (e.g. mocks). Never
+            used for the ``cli`` backend (ADR 0002 rule 10).
         registry: Model registry (entries and per-model facts).
         resolver: Resolves aliases and models (ADR 0006).
         pricing: Verified price lookup.
@@ -278,7 +302,7 @@ class CompareDeps:
         prompts_dir: Directory holding the prompt templates.
     """
 
-    providers: Mapping[str, Provider]
+    providers: Mapping[tuple[str, Backend], Provider]
     key_envs: Mapping[str, str]
     registry: RegistryLike
     resolver: ResolverLike
@@ -291,15 +315,45 @@ class CompareDeps:
     prompts_dir: Path = field(default_factory=default_prompts_dir)
 
 
+def provider_names(deps: CompareDeps) -> tuple[str, ...]:
+    """Provider ids in ``deps.providers``, in first-seen order, without duplicates."""
+    return tuple(dict.fromkeys(name for name, _ in deps.providers))
+
+
+def provider_backends(provider: str, deps: CompareDeps) -> tuple[Backend, ...]:
+    """Backends ``provider`` is reachable through, in ``deps.providers`` order."""
+    return tuple(backend for name, backend in deps.providers if name == provider)
+
+
 def key_is_set(env_var: str) -> bool:
     """Return whether ``env_var`` holds a non-empty value. Never exposes the value."""
     return bool(os.environ.get(env_var, "").strip())
 
 
-def build_default_deps(base_dir: Path) -> CompareDeps:
-    """Wire the real registry, pricing, estimator, ledger and API providers.
+def _cli_providers(registry: ModelRegistry) -> list[Provider]:
+    """Build the supported CLI providers (``skipped_reason`` unset), never running them."""
+    from llm_crossjury.core.providers.cli import (  # noqa: PLC0415
+        ClaudeCliProvider,
+        CodexCliProvider,
+        GrokCliProvider,
+    )
 
-    Loads ``base_dir / ".env"`` and then ``.<provider>.key`` files into the environment
+    built: list[Provider] = []
+    for cls in (ClaudeCliProvider, CodexCliProvider, GrokCliProvider):
+        if cls.skipped_reason is not None:
+            continue
+        # The adapters take ``(*, registry=None)``; the cast keeps this module
+        # independent of the exact constructor signature of the CLI base class.
+        factory = cast(Callable[..., Provider], cls)
+        built.append(factory(registry=registry))
+    return built
+
+
+def build_default_deps(base_dir: Path) -> CompareDeps:
+    """Wire the real registry, pricing, estimator, ledger, API and CLI providers.
+
+    CLI providers are only constructed here; nothing is executed until a check or a
+    call. Loads ``base_dir / ".env"`` and then ``.<provider>.key`` files into the environment
     (existing variables win) without printing anything.
 
     Args:
@@ -340,8 +394,13 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
         GeminiApiProvider(registry=registry),
         XaiApiProvider(registry=registry),
     )
+    providers: dict[tuple[str, Backend], Provider] = {
+        (p.name, Backend.API): p for p in api_providers
+    }
+    for cli in _cli_providers(registry):
+        providers[(cli.name, Backend.CLI)] = cli
     return CompareDeps(
-        providers={p.name: p for p in api_providers},
+        providers=providers,
         key_envs={p.name: p.api_key_env for p in api_providers},
         registry=registry,
         resolver=ModelResolver(registry, ResolutionMode.NORMAL),
@@ -356,14 +415,44 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
 
 
 class UsableModel(_Frozen):
-    """A model offered in the UI: a verified, priced ``api`` registry entry."""
+    """A model offered in the UI for one backend."""
 
     model_id: str
     aliases: tuple[str, ...]
 
 
-def usable_models(provider: str, deps: CompareDeps) -> tuple[UsableModel, ...]:
-    """Verified ``api`` entries of ``provider`` with a usable price, plus alias labels."""
+def is_cli_usable(entry: ModelEntry | None) -> bool:
+    """Whether ``entry`` can be selected on the ``cli`` backend (listed, with flags)."""
+    return entry is not None and Backend.CLI in entry.backends and entry.cli_flags is not None
+
+
+def is_usable(provider: str, model_id: str, backend: Backend, deps: CompareDeps) -> bool:
+    """Whether ``provider``/``model_id`` can be called on ``backend``.
+
+    ``api``: the registry lists the backend and the model has a verified price.
+    ``cli``: the registry lists the backend and has ``cli_flags``; no price needed.
+    Other backends (``mock``, tests only) are usable when the provider is registered.
+    """
+    if (provider, backend) not in deps.providers:
+        return False
+    entry = deps.registry.get(provider, model_id)
+    if backend is Backend.CLI:
+        return is_cli_usable(entry)
+    if backend is Backend.API:
+        if entry is None or Backend.API not in entry.backends:
+            return False
+        try:
+            deps.pricing.lookup(provider, model_id)
+        except PricingError:
+            return False
+    return True
+
+
+def usable_models(
+    provider: str, deps: CompareDeps, backend: Backend = Backend.API
+) -> tuple[UsableModel, ...]:
+    """Usable entries of ``provider`` on ``backend`` (see :func:`is_usable`), with the
+    aliases that point at them."""
     alias_map: dict[str, list[str]] = {}
     for alias in ALIAS_NAMES:
         try:
@@ -375,11 +464,7 @@ def usable_models(provider: str, deps: CompareDeps) -> tuple[UsableModel, ...]:
 
     models: list[UsableModel] = []
     for entry in deps.registry.entries():
-        if entry.provider != provider or Backend.API not in entry.backends:
-            continue
-        try:
-            deps.pricing.lookup(provider, entry.model_id)
-        except PricingError:
+        if entry.provider != provider or not is_usable(provider, entry.model_id, backend, deps):
             continue
         models.append(
             UsableModel(model_id=entry.model_id, aliases=tuple(alias_map.get(entry.model_id, ())))
@@ -461,11 +546,12 @@ def prefix_fingerprint(prompt: Prompt) -> str:
 
 @dataclass(frozen=True)
 class PreparedCall:
-    """A validated, resolved and priced member call, ready to estimate or run."""
+    """A validated, resolved and (for ``api``) priced member call."""
 
     selection: Selection
     resolved: ResolvedModel
-    pricing: Pricing
+    pricing: Pricing | None
+    """``None`` for the ``cli`` backend (unknown cost)."""
     request: CompletionRequest
     plan: CallPlan
 
@@ -476,12 +562,43 @@ def _validate(task: str, selections: Sequence[Selection], deps: CompareDeps) -> 
     if not selections:
         raise SelectionError("Select at least one provider.")
     seen: set[str] = set()
+    names = provider_names(deps)
     for sel in selections:
-        if sel.provider not in deps.providers:
+        if sel.provider not in names:
             raise SelectionError(f"Unknown provider {sel.provider!r}.")
+        if (sel.provider, sel.backend) not in deps.providers:
+            raise SelectionError(
+                f"Provider {sel.provider!r} is not available on the {sel.backend.value} backend."
+            )
         if sel.provider in seen:
             raise SelectionError(f"Provider {sel.provider!r} is selected more than once.")
         seen.add(sel.provider)
+
+
+def checked_price(
+    provider: str, model_id: str, backend: Backend, deps: CompareDeps
+) -> Pricing | None:
+    """Return the verified price of an ``api`` model, or ``None`` for ``cli``.
+
+    Raises:
+        SelectionError: a ``cli`` model without a registry cli entry with ``cli_flags``.
+        PricingError: an ``api`` model without a verified price, or a price in a
+            currency other than the budget currency.
+    """
+    if backend is Backend.CLI:
+        if not is_cli_usable(deps.registry.get(provider, model_id)):
+            raise SelectionError(
+                f"{provider}/{model_id} cannot be used through the CLI: the model "
+                "registry has no cli entry with cli_flags for it."
+            )
+        return None
+    price = deps.pricing.lookup(provider, model_id)
+    if price.currency != deps.budget.currency:
+        raise PricingError(
+            f"{provider}/{model_id} is priced in {price.currency}, "
+            f"but the budget is in {deps.budget.currency}."
+        )
+    return price
 
 
 def prepare_calls(
@@ -490,10 +607,11 @@ def prepare_calls(
     """Validate, resolve and price every selection, and build its request and plan.
 
     Raises:
-        SelectionError: invalid task or selections.
+        SelectionError: invalid task or selections, or a ``cli`` model without
+            registry ``cli_flags``.
         ResolutionError: a model cannot be resolved.
-        PricingError: a model has no verified price, or a price currency differs
-            from the budget currency.
+        PricingError: an ``api`` model has no verified price, or a price currency
+            differs from the budget currency.
     """
     _validate(task, selections, deps)
     template = load_prompt_template(deps.prompts_dir / f"{PROMPT_ID}.md")
@@ -508,17 +626,12 @@ def prepare_calls(
             member_id=sel.provider,
             provider=sel.provider,
             model=sel.model,
-            backend=Backend.API,
+            backend=sel.backend,
             role=ModelRole.ANSWERER,
             reasoning=ReasoningEffort.DEFAULT,
             native=None,
         )
-        price = deps.pricing.lookup(sel.provider, resolved.model_id)
-        if price.currency != deps.budget.currency:
-            raise PricingError(
-                f"{sel.provider}/{resolved.model_id} is priced in {price.currency}, "
-                f"but the budget is in {deps.budget.currency}."
-            )
+        price = checked_price(sel.provider, resolved.model_id, sel.backend, deps)
         entry = deps.registry.get(sel.provider, resolved.model_id)
         limit = entry.max_output if entry is not None else None
         if limit is not None and sel.max_output_tokens > limit:
@@ -542,7 +655,7 @@ def prepare_calls(
             stage=StageName.ANSWER.value,
             provider=sel.provider,
             model=resolved.model_id,
-            backend=Backend.API,
+            backend=sel.backend,
             reasoning=resolved.effective_reasoning,
             prefix_fingerprint=fingerprint,
             prefix_tokens=prefix_tokens,
@@ -574,16 +687,31 @@ async def estimate_compare(
     return _estimate_prepared(prepare_calls(task, selections, deps), deps)
 
 
+def cli_call_count(estimate: CostEstimate) -> int:
+    """Number of planned calls on the ``cli`` backend (unknown cost)."""
+    return sum(line.calls for line in estimate.lines if line.backend is Backend.CLI)
+
+
 def budget_status(estimate: CostEstimate, deps: CompareDeps) -> BudgetStatus:
-    """Compare ``estimate`` with the budget and today's ledger spend."""
+    """Compare ``estimate`` with the budget and today's ledger spend.
+
+    The limits apply to the priced part only. Unpriced ``cli`` calls are allowed
+    (they need consent, checked separately) and counted in ``cli_calls``; any other
+    unpriced call refuses the run.
+    """
     budget = deps.budget
     spent_today = deps.ledger.spent_on(date.today())  # local calendar day (SPEC §5)
     remaining = max(Decimal(0), budget.daily_limit - spent_today)
     high = estimate.total_high
     cur = budget.currency
+    unpriced = sum(
+        line.calls
+        for line in estimate.lines
+        if line.cost_high is None and line.backend is not Backend.CLI
+    )
     reason: str | None = None
-    if estimate.unpriced_calls:
-        reason = f"{estimate.unpriced_calls} call(s) cannot be priced."
+    if unpriced:
+        reason = f"{unpriced} call(s) cannot be priced."
     elif high > budget.run_limit:
         reason = (
             f"The high estimate ({cur} {high}) exceeds the run limit ({cur} {budget.run_limit})."
@@ -602,6 +730,7 @@ def budget_status(estimate: CostEstimate, deps: CompareDeps) -> BudgetStatus:
         daily_remaining=remaining,
         estimate_low=estimate.total_low,
         estimate_high=high,
+        cli_calls=cli_call_count(estimate),
         needs_confirmation=reason is None and high > budget.confirm_above,
         refused=reason is not None,
         refusal_reason=reason,
@@ -612,6 +741,7 @@ def budget_status(estimate: CostEstimate, deps: CompareDeps) -> BudgetStatus:
 
 
 def _budget(deps: CompareDeps) -> Budget:
+    # Only api calls are checked against the ledger; their cost is always known.
     return Budget(
         run_limit=deps.budget.run_limit,
         daily_limit=deps.budget.daily_limit,
@@ -620,9 +750,20 @@ def _budget(deps: CompareDeps) -> Budget:
     )
 
 
+def require_consent(cli_calls: int, allow_unknown_cost: bool) -> None:
+    """Refuse ``cli`` calls without consent to unknown cost (ADR 0003).
+
+    Raises:
+        ConsentRequiredError: ``cli_calls > 0`` and ``allow_unknown_cost`` is false.
+    """
+    if cli_calls and not allow_unknown_cost:
+        raise ConsentRequiredError(cli_calls)
+
+
 def _error_result(call: PreparedCall, currency: str, error: str) -> MemberResult:
     return MemberResult(
         provider=call.selection.provider,
+        backend=call.selection.backend,
         model=call.resolved.model_id,
         requested_model=call.selection.model,
         text=None,
@@ -649,7 +790,7 @@ async def execute_budgeted_call(
     stage: str,
     provider: str,
     resolved: ResolvedModel,
-    pricing: Pricing,
+    pricing: Pricing | None,
     request: CompletionRequest,
     call_high: Decimal,
     deps: CompareDeps,
@@ -661,12 +802,16 @@ async def execute_budgeted_call(
     reservation is released only after the call is recorded, so spent + reserved
     never dips.
 
+    A ``cli`` call (``resolved.backend``) has unknown cost: it is neither checked nor
+    reserved (the limits apply to priced spend only; the caller must have obtained
+    consent), and it is recorded with ``cost=None`` and its duration.
+
     Args:
         run_id: Run the call belongs to (per-run limit and ledger grouping).
         stage: Stage name recorded in the ledger.
-        provider: Provider id (key into ``deps.providers``).
+        provider: Provider id; with ``resolved.backend`` the key into ``deps.providers``.
         resolved: The resolved model.
-        pricing: Its verified price.
+        pricing: Its verified price; ``None`` only for the ``cli`` backend.
         request: The request to send; ``run_id`` is added to its tags.
         call_high: High cost estimate of this call, checked and reserved.
         deps: Compare dependencies.
@@ -677,14 +822,19 @@ async def execute_budgeted_call(
         Exception: anything else the adapter raises, unchanged.
     """
     ledger = deps.ledger
-    ledger.check(run_id, call_high, _budget(deps))
-    reservation = ledger.reserve(run_id, call_high)
+    backend = resolved.backend
+    if pricing is None and backend is not Backend.CLI:
+        raise ValueError(f"{provider}/{resolved.model_id}: a {backend} call needs a price")
+    reservation: str | None = None
+    if backend is not Backend.CLI:
+        ledger.check(run_id, call_high, _budget(deps))
+        reservation = ledger.reserve(run_id, call_high)
     try:
         tagged = request.model_copy(update={"tags": {**request.tags, "run_id": run_id}})
         started = time.perf_counter()
-        result = await deps.providers[provider].complete(tagged)
+        result = await deps.providers[(provider, backend)].complete(tagged)
         latency = time.perf_counter() - started
-        cost = deps.compute_cost(result.usage, pricing)
+        cost = None if pricing is None else deps.compute_cost(result.usage, pricing)
         ledger.record(
             LedgerEntry(
                 run_id=run_id,
@@ -695,7 +845,7 @@ async def execute_budgeted_call(
                 reasoning=resolved.effective_reasoning,
                 usage=result.usage,
                 cost=cost,
-                currency=pricing.currency,
+                currency=deps.budget.currency if pricing is None else pricing.currency,
                 batched=False,
                 duration_s=latency,
                 recorded_at=datetime.now(UTC),
@@ -703,7 +853,8 @@ async def execute_budgeted_call(
         )
         return BudgetedCallResult(result=result, cost=cost, latency_s=latency)
     finally:
-        ledger.release(reservation)
+        if reservation is not None:
+            ledger.release(reservation)
 
 
 async def _run_member(
@@ -711,7 +862,7 @@ async def _run_member(
 ) -> MemberResult:
     sel = call.selection
     currency = deps.budget.currency
-    key_env = deps.key_envs.get(sel.provider)
+    key_env = deps.key_envs.get(sel.provider) if sel.backend is Backend.API else None
     if key_env is not None and not key_is_set(key_env):
         return _error_result(call, currency, f"{key_env} is not set. Add it to .env.")
     try:
@@ -734,25 +885,36 @@ async def _run_member(
         return _error_result(call, currency, f"Unexpected error ({type(exc).__name__}).")
     return MemberResult(
         provider=sel.provider,
+        backend=sel.backend,
         model=call.resolved.model_id,
         requested_model=sel.model,
         text=done.result.text,
         error=None,
         usage=done.result.usage,
         cost=done.cost,
-        currency=call.pricing.currency,
+        currency=currency if call.pricing is None else call.pricing.currency,
         latency_s=done.latency_s,
     )
 
 
 async def execute_calls(
-    run_id: str, prepared: Sequence[PreparedCall], deps: CompareDeps
+    run_id: str,
+    prepared: Sequence[PreparedCall],
+    deps: CompareDeps,
+    *,
+    allow_unknown_cost: bool = False,
 ) -> CompareResult:
     """Run prepared calls concurrently; each member's failure stays in its own entry.
 
-    No run-level pre-check happens here (see :func:`run_compare`); each call is still
-    checked against the ledger before it starts.
+    No run-level budget pre-check happens here (see :func:`run_compare`); each ``api``
+    call is still checked against the ledger before it starts.
+
+    Raises:
+        ConsentRequiredError: a ``cli`` call without ``allow_unknown_cost``.
     """
+    require_consent(
+        sum(1 for call in prepared if call.selection.backend is Backend.CLI), allow_unknown_cost
+    )
     highs = [_estimate_prepared([call], deps).total_high for call in prepared]
     members = await asyncio.gather(
         *(_run_member(run_id, call, high, deps) for call, high in zip(prepared, highs, strict=True))
@@ -779,16 +941,30 @@ async def run_compare(
     deps: CompareDeps,
     *,
     run_id: str | None = None,
+    allow_unknown_cost: bool = False,
 ) -> CompareResult:
-    """Estimate, check the budget, then run every selected member concurrently.
+    """Check consent, estimate, check the budget, then run every member concurrently.
+
+    Args:
+        task: The user's task.
+        selections: The members.
+        deps: Compare dependencies.
+        run_id: Run id to use (default: a new one).
+        allow_unknown_cost: The user consented to ``cli`` calls of unknown cost that
+            count against their plan's usage limits. Required for any ``cli`` member.
 
     Raises:
         SelectionError, ResolutionError, PricingError: see :func:`prepare_calls`.
-        BudgetRefusedError: the high estimate exceeds the run limit or today's
-            remaining budget. No call is made.
+        ConsentRequiredError: a ``cli`` member without ``allow_unknown_cost``.
+        BudgetRefusedError: the high estimate of the priced part exceeds the run
+            limit or today's remaining budget. No call is made.
     """
     prepared = prepare_calls(task, selections, deps)
-    status = budget_status(_estimate_prepared(prepared, deps), deps)
+    estimate = _estimate_prepared(prepared, deps)
+    require_consent(cli_call_count(estimate), allow_unknown_cost)
+    status = budget_status(estimate, deps)
     if status.refused:
         raise BudgetRefusedError(status.refusal_reason or "Refused by the budget.", status)
-    return await execute_calls(run_id or new_run_id(), prepared, deps)
+    return await execute_calls(
+        run_id or new_run_id(), prepared, deps, allow_unknown_cost=allow_unknown_cost
+    )
