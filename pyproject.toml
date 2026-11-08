@@ -18,6 +18,12 @@ dependencies = [
     "typer>=0.12",
     "pyyaml>=6.0",
     "platformdirs>=4.0",
+    "anthropic>=2.6.0",
+    "google-genai>=3.0.0",
+    "openai>=3.46.0",
+    "fastapi>=0.162.2",
+    "uvicorn>=0.54.0",
+    "python-dotenv>=1.2.4",
 ]
 
 [project.scripts]
@@ -37,6 +43,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-PyYAML>=6.0",
+    "httpx>=0.28.1",
 ]
 
 # --------------------------------------------------------------------------- pytest

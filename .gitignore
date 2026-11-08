@@ -34,3 +34,6 @@ Thumbs.db
 # Frontend (later phase)
 frontend/node_modules/
 frontend/dist/
+
+# Local model registry with real, user-verified entries (see config/models.yaml)
+config/models.local.yaml
