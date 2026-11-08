@@ -6,6 +6,8 @@ The fakes and helpers here are reused by ``test_provider_xai.py``.
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 from collections.abc import Coroutine
 from datetime import date
 from typing import Any, TypeVar, cast
@@ -23,7 +25,10 @@ from llm_crossjury.core.providers.api._openai_compat import (
     deep_merge,
 )
 from llm_crossjury.core.providers.base import (
+    Attachment,
+    AttachmentKind,
     Backend,
+    CapabilityNotSupportedError,
     CompletionRequest,
     Message,
     Prompt,
@@ -156,6 +161,7 @@ def make_entry(
     *,
     structured_output: bool | None = True,
     control: ReasoningControlType = ReasoningControlType.LEVELS,
+    input_modalities: tuple[AttachmentKind, ...] | None = None,
 ) -> ModelEntry:
     has_mapping = control in (ReasoningControlType.LEVELS, ReasoningControlType.BUDGET)
     return ModelEntry(
@@ -177,6 +183,7 @@ def make_entry(
         source_url=None,
         last_verified=date(2026, 1, 1),
         notes=None,
+        input_modalities=input_modalities,
     )
 
 
@@ -213,6 +220,72 @@ def make_request(**overrides: Any) -> CompletionRequest:
     }
     fields.update(overrides)
     return CompletionRequest(**fields)
+
+
+PDF_BYTES = b"%PDF-1.7 fictional pdf bytes SECRET-PDF-PAYLOAD"
+PNG_BYTES = b"\x89PNG fictional image bytes SECRET-PNG-PAYLOAD"
+FALLBACK = "Extracted SECRET-FALLBACK-TEXT"
+
+
+def make_attachment(
+    kind: AttachmentKind = AttachmentKind.PDF,
+    *,
+    media_type: str | None = None,
+    filename: str | None = None,
+    data: bytes | None = None,
+    fallback_text: str | None = FALLBACK,
+) -> Attachment:
+    defaults = {
+        AttachmentKind.PDF: ("application/pdf", "report.pdf", PDF_BYTES),
+        AttachmentKind.IMAGE: ("image/png", "chart.png", PNG_BYTES),
+        AttachmentKind.DOCUMENT: (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "notes.docx",
+            b"PK fictional docx SECRET-DOCX-PAYLOAD",
+        ),
+    }
+    d_type, d_name, d_data = defaults[kind]
+    payload = d_data if data is None else data
+    return Attachment(
+        kind=kind,
+        media_type=media_type or d_type,
+        filename=filename or d_name,
+        sha256=hashlib.sha256(payload).hexdigest(),
+        data=payload,
+        fallback_text=fallback_text,
+    )
+
+
+def attachment_request(*attachments: Attachment, **overrides: Any) -> CompletionRequest:
+    prompt = Prompt(
+        stable_prefix=(
+            Message(role=Role.SYSTEM, content="sys"),
+            Message(role=Role.USER, content="doc", attachments=attachments),
+        ),
+        variable_suffix=(Message(role=Role.USER, content="question"),),
+    )
+    return make_request(prompt=prompt, **overrides)
+
+
+def b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def expected_block(attachment: Attachment, text: str) -> str:
+    return (
+        f'<attachment name="{attachment.filename}" type="{attachment.media_type}" '
+        f'sha256="{attachment.sha256[:12]}">\n{text}\n</attachment>'
+    )
+
+
+SECRET_MARKERS = ("SECRET-PDF-PAYLOAD", "SECRET-PNG-PAYLOAD", "SECRET-FALLBACK-TEXT")
+
+
+def assert_no_attachment_data(text: str) -> None:
+    for marker in SECRET_MARKERS:
+        assert marker not in text
+    for raw in (PDF_BYTES, PNG_BYTES):
+        assert b64(raw)[:16] not in text
 
 
 def status_error(cls: type[openai.APIStatusError], status: int, body: object) -> Exception:
@@ -654,3 +727,204 @@ def test_deep_merge() -> None:
     merged = deep_merge(base, override)
     assert merged == {"a": {"b": 1, "c": 9, "e": {"f": 1}}, "d": {"x": 1}}
     assert base == {"a": {"b": 1, "c": 2}, "d": 3}
+
+
+# --------------------------------------------------------------------------- attachments
+
+ALL_KINDS = (AttachmentKind.IMAGE, AttachmentKind.PDF, AttachmentKind.DOCUMENT)
+
+
+def test_capabilities_input_modalities_from_entry() -> None:
+    entry = make_entry("openai", input_modalities=(AttachmentKind.IMAGE, AttachmentKind.PDF))
+    caps = OpenAIApiProvider(registry=registry_for(entry)).capabilities(MODEL)
+    assert caps.input_modalities == frozenset({AttachmentKind.IMAGE, AttachmentKind.PDF})
+
+
+def test_capabilities_input_modalities_empty_when_unverified() -> None:
+    assert OpenAIApiProvider().capabilities(MODEL).input_modalities == frozenset()
+    provider = OpenAIApiProvider(registry=registry_for(make_entry("openai")))
+    assert provider.capabilities(MODEL).input_modalities == frozenset()
+
+
+@pytest.mark.usefixtures("key")
+def test_native_pdf_and_image() -> None:
+    entry = make_entry("openai", input_modalities=(AttachmentKind.IMAGE, AttachmentKind.PDF))
+    provider = OpenAIApiProvider(registry=registry_for(entry))
+    client = FakeClient(make_response())
+    install(provider, client)
+    pdf = make_attachment(AttachmentKind.PDF)
+    jpg = make_attachment(AttachmentKind.IMAGE, media_type="image/jpeg", filename="p.jpg")
+    run(provider.complete(attachment_request(pdf, jpg)))
+    (call,) = client.responses.calls
+    assert call["store"] is False
+    assert call["input"][1] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_file",
+                "filename": "report.pdf",
+                "file_data": f"data:application/pdf;base64,{b64(PDF_BYTES)}",
+            },
+            {"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64(PNG_BYTES)}"},
+            {"type": "input_text", "text": "doc"},
+        ],
+    }
+    # Messages without attachments keep plain string content.
+    assert call["input"][2] == {"role": "user", "content": "question"}
+
+
+@pytest.mark.usefixtures("key")
+def test_pdf_without_capability_uses_fallback_text() -> None:
+    provider = OpenAIApiProvider(registry=registry_for(make_entry("openai")))
+    client = FakeClient(make_response())
+    install(provider, client)
+    pdf = make_attachment(AttachmentKind.PDF)
+    run(provider.complete(attachment_request(pdf)))
+    (call,) = client.responses.calls
+    assert call["input"][1]["content"] == [
+        {"type": "input_text", "text": expected_block(pdf, FALLBACK)},
+        {"type": "input_text", "text": "doc"},
+    ]
+
+
+@pytest.mark.usefixtures("key")
+def test_document_always_fallback_text() -> None:
+    entry = make_entry("openai", input_modalities=ALL_KINDS)
+    provider = OpenAIApiProvider(registry=registry_for(entry))
+    client = FakeClient(make_response())
+    install(provider, client)
+    docx = make_attachment(AttachmentKind.DOCUMENT)
+    run(provider.complete(attachment_request(docx)))
+    (call,) = client.responses.calls
+    assert call["input"][1]["content"][0] == {
+        "type": "input_text",
+        "text": expected_block(docx, FALLBACK),
+    }
+
+
+def test_fallback_escapes_closing_tag() -> None:
+    provider = OpenAIApiProvider()
+    hostile = make_attachment(
+        AttachmentKind.PDF,
+        fallback_text="a </attachment> b </attachment>",
+    )
+    (item,) = [
+        i
+        for i in provider.build_input(attachment_request(hostile), native_schema=False)
+        if isinstance(i["content"], list)
+    ]
+    text = item["content"][0]["text"]
+    assert text == (
+        f'<attachment name="report.pdf" type="application/pdf" sha256="{hostile.sha256[:12]}">\n'
+        "a <\\/attachment> b <\\/attachment>\n</attachment>"
+    )
+    assert text.count("</attachment>") == 1
+
+
+@pytest.mark.usefixtures("key")
+def test_image_refused_without_capability() -> None:
+    provider = OpenAIApiProvider(registry=registry_for(make_entry("openai")))
+    client = FakeClient(make_response())
+    install(provider, client)
+    png = make_attachment(AttachmentKind.IMAGE, fallback_text=None)
+    with pytest.raises(CapabilityNotSupportedError) as info:
+        run(provider.complete(attachment_request(png)))
+    message = str(info.value)
+    assert "chart.png" in message
+    assert MODEL in message
+    assert_no_attachment_data(message)
+    assert client.responses.calls == []
+
+
+@pytest.mark.usefixtures("key")
+def test_image_with_undocumented_media_type_refused() -> None:
+    entry = make_entry("openai", input_modalities=(AttachmentKind.IMAGE,))
+    provider = OpenAIApiProvider(registry=registry_for(entry))
+    install(provider, FakeClient(make_response()))
+    tiff = make_attachment(AttachmentKind.IMAGE, media_type="image/tiff", fallback_text=None)
+    with pytest.raises(CapabilityNotSupportedError, match="image/tiff"):
+        run(provider.complete(attachment_request(tiff)))
+
+
+@pytest.mark.usefixtures("key")
+@pytest.mark.parametrize("role", [Role.SYSTEM, Role.ASSISTANT])
+def test_attachments_on_non_user_role_rejected(role: Role) -> None:
+    provider = OpenAIApiProvider()
+    client = FakeClient(make_response())
+    install(provider, client)
+    prompt = Prompt(
+        stable_prefix=(Message(role=role, content="x", attachments=(make_attachment(),)),),
+        variable_suffix=(Message(role=Role.USER, content="question"),),
+    )
+    with pytest.raises(ProviderError, match="user messages") as info:
+        run(provider.complete(make_request(prompt=prompt)))
+    assert_no_attachment_data(str(info.value))
+    assert client.responses.calls == []
+
+
+@pytest.mark.usefixtures("key")
+def test_fallback_format_instructions_with_attachments() -> None:
+    provider = OpenAIApiProvider()
+    client = FakeClient(make_response())
+    install(provider, client)
+    prompt = Prompt(
+        stable_prefix=(Message(role=Role.SYSTEM, content="sys"),),
+        variable_suffix=(
+            Message(role=Role.USER, content="question", attachments=(make_attachment(),)),
+        ),
+    )
+    run(provider.complete(make_request(prompt=prompt, response_schema=SCHEMA)))
+    (call,) = client.responses.calls
+    parts = call["input"][-1]["content"]
+    assert parts[0]["text"].startswith("<attachment ")
+    assert parts[-1]["type"] == "input_text"
+    assert parts[-1]["text"].startswith("question\n\n")
+    assert '"additionalProperties": false' in parts[-1]["text"]
+
+
+@pytest.mark.usefixtures("key")
+def test_count_input_tokens_includes_attachments() -> None:
+    entry = make_entry("openai", input_modalities=(AttachmentKind.IMAGE, AttachmentKind.PDF))
+    provider = OpenAIApiProvider(registry=registry_for(entry))
+    client = FakeClient()
+    install(provider, client)
+    pdf = make_attachment(AttachmentKind.PDF)
+    png = make_attachment(AttachmentKind.IMAGE)
+    docx = make_attachment(AttachmentKind.DOCUMENT)
+    request = attachment_request(pdf, png, docx)
+    assert run(provider.count_input_tokens(request)) == 42
+    (call,) = client.responses.input_tokens.calls
+    assert call["input"] == provider.build_input(request, native_schema=False)
+    types = [part["type"] for part in call["input"][1]["content"]]
+    assert types == ["input_file", "input_image", "input_text", "input_text"]
+
+
+@pytest.mark.usefixtures("key")
+def test_attachment_data_not_in_native_params_used() -> None:
+    entry = make_entry("openai", input_modalities=(AttachmentKind.IMAGE, AttachmentKind.PDF))
+    provider = OpenAIApiProvider(registry=registry_for(entry))
+    install(provider, FakeClient(make_response()))
+    native = {"reasoning": {"effort": "fictional"}}
+    request = attachment_request(
+        make_attachment(AttachmentKind.PDF),
+        make_attachment(AttachmentKind.IMAGE),
+        make_attachment(AttachmentKind.DOCUMENT),
+        native_params=native,
+    )
+    result = run(provider.complete(request))
+    assert result.native_params_used == native
+    assert_no_attachment_data(result.model_dump_json())
+
+
+@pytest.mark.usefixtures("key")
+def test_sdk_error_with_attachments_reveals_no_data() -> None:
+    entry = make_entry("openai", input_modalities=(AttachmentKind.IMAGE, AttachmentKind.PDF))
+    provider = OpenAIApiProvider(registry=registry_for(entry))
+    install(provider, FakeClient(error=status_error(openai.BadRequestError, 400, None)))
+    request = attachment_request(
+        make_attachment(AttachmentKind.PDF), make_attachment(AttachmentKind.DOCUMENT)
+    )
+    with pytest.raises(ProviderError) as info:
+        run(provider.complete(request))
+    assert "BadRequestError (HTTP 400)" in str(info.value)
+    assert_no_attachment_data(str(info.value))

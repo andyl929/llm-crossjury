@@ -9,7 +9,9 @@ from openai._models import construct_type
 from llm_crossjury.core.providers.api import XaiApiProvider
 from llm_crossjury.core.providers.api.xai import XAI_BASE_URL
 from llm_crossjury.core.providers.base import (
+    AttachmentKind,
     Backend,
+    CapabilityNotSupportedError,
     Provider,
     ProviderError,
     ProviderUnavailableError,
@@ -17,10 +19,17 @@ from llm_crossjury.core.providers.base import (
 from llm_crossjury.core.registry.schema import ReasoningControlType
 from tests.unit.test_provider_openai import (
     FAKE_KEY,
+    FALLBACK,
     MODEL,
+    PNG_BYTES,
     SCHEMA,
     FakeClient,
+    assert_no_attachment_data,
+    attachment_request,
+    b64,
+    expected_block,
     install,
+    make_attachment,
     make_entry,
     make_request,
     make_response,
@@ -154,3 +163,91 @@ def test_check_set() -> None:
     assert status.available is True
     assert "XAI_API_KEY set" in status.detail
     assert FAKE_KEY[:4] not in status.model_dump_json()
+
+
+# --------------------------------------------------------------------------- attachments
+
+ALL_KINDS = (AttachmentKind.IMAGE, AttachmentKind.PDF, AttachmentKind.DOCUMENT)
+
+
+def test_capabilities_drop_pdf_and_document() -> None:
+    provider = XaiApiProvider(registry=registry_for(make_entry("xai", input_modalities=ALL_KINDS)))
+    assert provider.capabilities(MODEL).input_modalities == frozenset({AttachmentKind.IMAGE})
+    assert XaiApiProvider().capabilities(MODEL).input_modalities == frozenset()
+
+
+@pytest.mark.usefixtures("key")
+def test_image_native_and_pdf_as_fallback_even_if_registry_claims_pdf() -> None:
+    provider = XaiApiProvider(registry=registry_for(make_entry("xai", input_modalities=ALL_KINDS)))
+    client = FakeClient(make_response())
+    install(provider, client)
+    png = make_attachment(AttachmentKind.IMAGE)
+    pdf = make_attachment(AttachmentKind.PDF)
+    docx = make_attachment(AttachmentKind.DOCUMENT)
+    run(provider.complete(attachment_request(png, pdf, docx)))
+    (call,) = client.responses.calls
+    assert call["store"] is False
+    assert call["input"][1] == {
+        "role": "user",
+        "content": [
+            {"type": "input_image", "image_url": f"data:image/png;base64,{b64(PNG_BYTES)}"},
+            {"type": "input_text", "text": expected_block(pdf, FALLBACK)},
+            {"type": "input_text", "text": expected_block(docx, FALLBACK)},
+            {"type": "input_text", "text": "doc"},
+        ],
+    }
+    assert "input_file" not in str(call)
+
+
+@pytest.mark.usefixtures("key")
+def test_pdf_without_fallback_refused() -> None:
+    provider = XaiApiProvider(registry=registry_for(make_entry("xai", input_modalities=ALL_KINDS)))
+    client = FakeClient(make_response())
+    install(provider, client)
+    pdf = make_attachment(AttachmentKind.PDF, fallback_text=None)
+    with pytest.raises(CapabilityNotSupportedError, match=r"report.pdf") as info:
+        run(provider.complete(attachment_request(pdf)))
+    assert_no_attachment_data(str(info.value))
+    assert client.responses.calls == []
+
+
+@pytest.mark.usefixtures("key")
+def test_image_refused_without_capability() -> None:
+    provider = XaiApiProvider(registry=registry_for(make_entry("xai")))
+    install(provider, FakeClient(make_response()))
+    png = make_attachment(AttachmentKind.IMAGE, fallback_text=None)
+    with pytest.raises(CapabilityNotSupportedError) as info:
+        run(provider.complete(attachment_request(png)))
+    assert "chart.png" in str(info.value)
+    assert MODEL in str(info.value)
+
+
+@pytest.mark.usefixtures("key")
+def test_webp_refused_as_undocumented() -> None:
+    provider = XaiApiProvider(registry=registry_for(make_entry("xai", input_modalities=ALL_KINDS)))
+    install(provider, FakeClient(make_response()))
+    webp = make_attachment(AttachmentKind.IMAGE, media_type="image/webp", fallback_text=None)
+    with pytest.raises(CapabilityNotSupportedError, match="image/webp"):
+        run(provider.complete(attachment_request(webp)))
+
+
+@pytest.mark.usefixtures("key")
+def test_count_input_tokens_with_attachments_is_none() -> None:
+    provider = XaiApiProvider(registry=registry_for(make_entry("xai", input_modalities=ALL_KINDS)))
+    client = FakeClient()
+    install(provider, client)
+    request = attachment_request(make_attachment(AttachmentKind.IMAGE))
+    assert run(provider.count_input_tokens(request)) is None
+    assert client.factory_args is None
+
+
+@pytest.mark.usefixtures("key")
+def test_attachment_data_not_in_result() -> None:
+    provider = XaiApiProvider(registry=registry_for(make_entry("xai", input_modalities=ALL_KINDS)))
+    install(provider, FakeClient(make_response()))
+    request = attachment_request(
+        make_attachment(AttachmentKind.IMAGE), make_attachment(AttachmentKind.PDF)
+    )
+    result = run(provider.complete(request))
+    assert result.native_params_used == {}
+    assert_no_attachment_data(result.model_dump_json())

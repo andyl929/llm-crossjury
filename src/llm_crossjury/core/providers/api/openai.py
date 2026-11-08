@@ -25,7 +25,15 @@ Verified 2026-11-08 against:
   "strict": true}``; refusals are ``refusal`` content parts
   (https://developers.openai.com/api/docs/guides/structured-outputs).
 * Input token counting: ``POST /v1/responses/input_tokens``, exposed by the SDK as
-  ``client.responses.input_tokens.count``.
+  ``client.responses.input_tokens.count``. It accepts image and file parts "as you
+  would for ``responses.create``", so attachments are counted
+  (https://developers.openai.com/api/docs/guides/token-counting).
+* Attachments (ADR 0007): PDFs go inline as ``input_file`` with a base64
+  ``file_data`` data URL (https://developers.openai.com/api/docs/guides/pdf-files);
+  images as ``input_image`` with a base64 data URL. Accepted image types: "PNG
+  (``.png``), JPEG (``.jpeg`` or ``.jpg``), WEBP (``.webp``), and non-animated GIF
+  (``.gif``)" (https://developers.openai.com/api/docs/guides/images-vision).
+  ``detail`` defaults to ``auto`` for both and is not sent.
 """
 
 from __future__ import annotations
@@ -58,6 +66,7 @@ class OpenAIApiProvider(OpenAICompatProvider):
     reasoning_in_output = True
     supports_input_token_count = True
     documents_prompt_caching = True
+    native_image_media_types = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 
     def __init__(
         self,
