@@ -24,6 +24,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from datetime import date
 from decimal import Decimal
 from importlib import resources
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -63,6 +64,7 @@ from llm_crossjury.core.synthesis_service import (
     run_finish_step,
     run_resynthesis,
 )
+from llm_crossjury.web.settings_api import create_settings_router
 
 LOOPBACK_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
 """Default ``Host`` header values the app accepts."""
@@ -328,6 +330,7 @@ def create_app(
     deps_factory: DepsFactory,
     *,
     allowed_hosts: Sequence[str] = LOOPBACK_HOSTS,
+    key_base_dir: Path | None = None,
 ) -> FastAPI:
     """Create the compare UI app.
 
@@ -335,6 +338,8 @@ def create_app(
         deps_factory: Builds the compare dependencies. Called once, on first use.
         allowed_hosts: Accepted ``Host`` header names (without port); ``"*"`` accepts
             any host.
+        key_base_dir: Directory holding ``.env`` and the key files, for the settings
+            page (default: the current directory).
     """
     app = FastAPI(
         title="llm-crossjury",
@@ -464,6 +469,12 @@ def create_app(
         return await run_compare(body.task, body.selections, d)
 
     _add_synthesis_routes(app, deps)
+    app.include_router(
+        create_settings_router(
+            base_dir=key_base_dir if key_base_dir is not None else Path.cwd(),
+            allowed_hosts=allowed_hosts,
+        )
+    )
 
     return app
 

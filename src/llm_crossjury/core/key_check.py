@@ -98,7 +98,7 @@ async def _list_gemini(api_key: str, timeout_s: float) -> None:
         await client.aio.aclose()
 
 
-DEFAULT_LISTERS: Mapping[str, ModelLister] = {
+DEFAULT_LISTERS: dict[str, ModelLister] = {
     "anthropic": _list_anthropic,
     "openai": _list_openai,
     "gemini": _list_gemini,
