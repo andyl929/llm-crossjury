@@ -1,5 +1,15 @@
 {
   "$defs": {
+    "AttachmentKind": {
+      "description": "What an attached file is, for capability matching (ADR 0007).",
+      "enum": [
+        "image",
+        "pdf",
+        "document"
+      ],
+      "title": "AttachmentKind",
+      "type": "string"
+    },
     "Backend": {
       "description": "How a provider reaches the model.",
       "enum": [
@@ -233,6 +243,21 @@
             }
           ],
           "title": "Notes"
+        },
+        "input_modalities": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/AttachmentKind"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Modalities"
         }
       },
       "required": [

@@ -247,8 +247,10 @@ Paused runs can be resumed from another process (§7, storage).
 ## 9. Non-goals (v1)
 
 - Web UI and HTTP API (a later phase; `frontend/` is a placeholder).
-- Input formats other than Markdown and LaTeX (no PDF, DOCX, multi-file LaTeX
-  projects or `\input` resolution).
+- Document Review input formats other than Markdown and LaTeX (no PDF, DOCX,
+  multi-file LaTeX projects or `\input` resolution). *Amended 2026-11-08:* task
+  attachments (PDF, DOCX, images) in Compare and its synthesis upgrade are in scope;
+  see ADR 0007.
 - Writing edits back into the user's file automatically.
 - Tool use, web browsing or code execution by members.
 - Multi-turn conversation with the council. One run is one task.

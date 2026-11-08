@@ -72,3 +72,14 @@ Template:
   `cost.reasoning_multipliers`. `schemas/config/ModelRegistryFile.schema.json` was
   regenerated.
 - Status: done
+
+### CI-5: File attachments (approved by the maintainer, 2026-11-08)
+- `providers/base.py`: new `AttachmentKind` and `Attachment`; `Message.attachments:
+  tuple[Attachment, ...] = ()`; `Capabilities.input_modalities:
+  frozenset[AttachmentKind] = frozenset()`. Both new fields have defaults, so existing
+  callers are unaffected.
+- `registry/schema.py`: new `ModelEntry.input_modalities: tuple[AttachmentKind, ...] |
+  None = None` (`None` = unverified = text only). `schemas/config/ModelRegistryFile.schema.json`
+  regenerated.
+- Rationale and rules: ADR 0007.
+- Status: done

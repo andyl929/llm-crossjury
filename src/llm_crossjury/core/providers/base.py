@@ -65,11 +65,50 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class AttachmentKind(StrEnum):
+    """What an attached file is, for capability matching (ADR 0007)."""
+
+    IMAGE = "image"
+    """A raster image (PNG, JPEG, WebP, GIF)."""
+    PDF = "pdf"
+    """A PDF document."""
+    DOCUMENT = "document"
+    """Any other document (e.g. DOCX). Never sent natively in v1: always as
+    ``fallback_text``."""
+
+
+class Attachment(_Frozen):
+    """A file attached to a user message (ADR 0007).
+
+    Adapters send it natively when ``kind`` is in ``Capabilities.input_modalities``;
+    otherwise they inline ``fallback_text`` (locally extracted text) or raise
+    :class:`CapabilityNotSupportedError` if there is none. Attachments are sent
+    inline (never through a vendor Files API), so nothing is retained by the vendor
+    beyond its normal request handling.
+    """
+
+    kind: AttachmentKind
+    media_type: str
+    """IANA media type, e.g. ``"application/pdf"``, ``"image/png"``."""
+    filename: str
+    """Base name only; never a path."""
+    sha256: str
+    """Hex digest of ``data``; part of the cache-relevant identity of a prefix."""
+    data: bytes
+    fallback_text: str | None
+    """Locally extracted text; ``None`` when no text can be extracted (images)."""
+
+
 class Message(_Frozen):
-    """A single chat message."""
+    """A single chat message.
+
+    ``attachments`` is allowed on ``USER`` messages only (validated by adapters).
+    Attachments meant to be shared across calls belong in ``Prompt.stable_prefix``.
+    """
 
     role: Role
     content: str
+    attachments: tuple[Attachment, ...] = ()
 
 
 class Prompt(_Frozen):
@@ -118,6 +157,10 @@ class Capabilities(_Frozen):
 
     reasoning: bool
     """Maps ReasoningEffort LOW/MEDIUM/HIGH onto a vendor control."""
+
+    input_modalities: frozenset[AttachmentKind] = frozenset()
+    """Attachment kinds the model accepts natively (ADR 0007). Text is always
+    accepted and is not listed. Empty = attachments only via ``fallback_text``."""
 
 
 class Usage(_Frozen):
