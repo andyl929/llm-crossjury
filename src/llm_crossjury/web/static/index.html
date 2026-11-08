@@ -14,10 +14,18 @@
   </header>
 
   <main class="page">
-    <section class="panel">
+    <section id="task-panel" class="panel task-panel">
       <label for="task" class="section-label">Task</label>
       <textarea id="task" rows="6" spellcheck="true"
         placeholder="Ask a question or describe a task. Each selected model answers it independently."></textarea>
+      <div class="attach-bar">
+        <button id="attach-btn" type="button" class="btn btn-small">Attach files</button>
+        <input id="attach-input" type="file" multiple hidden
+          accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif">
+        <span id="attach-hint" class="muted">PDF, Word (DOCX) or images, up to 20 MB in total. You can also drop files here.</span>
+      </div>
+      <ul id="attach-list" class="attach-list" hidden></ul>
+      <p id="attach-privacy" class="attach-privacy" hidden></p>
     </section>
 
     <section class="panel">
@@ -56,6 +64,7 @@
       </div>
       <div id="syn-unavailable" class="muted" hidden></div>
       <div id="syn-form" class="synth-form">
+        <p id="syn-attach-note" class="muted" hidden></p>
         <label for="syn-instructions" class="field-label">Extra instructions <span class="muted">(optional)</span></label>
         <textarea id="syn-instructions" rows="3" spellcheck="true"
           placeholder="Comparison criteria, or a follow-up question for the reviewers and the chair."></textarea>

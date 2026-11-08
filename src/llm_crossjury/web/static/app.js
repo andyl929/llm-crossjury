@@ -13,6 +13,8 @@
     estimate: null,     // last estimate response
     estimateKey: null,  // JSON of the request the estimate belongs to
     busy: false,
+    attachments: [],    // uploaded files: AttachmentInfo from /api/attachments
+    uploading: 0,       // uploads in flight
   };
 
   const $ = (id) => document.getElementById(id);
@@ -276,7 +278,7 @@
   }
 
   function currentRequest() {
-    return { task: $("task").value, selections: selections() };
+    return { task: $("task").value, selections: selections(), attachment_ids: attachmentIds() };
   }
 
   function needsConsent(req) {
@@ -303,6 +305,140 @@
     updateButtons();
   }
 
+  // ------------------------------------------------------------------ attachments
+  //
+  // Files are uploaded once (POST /api/attachments, multipart) and then referred to
+  // by id (their sha256) in estimate, run and synthesis requests. The server checks
+  // the type by content; the accept list only filters the file picker.
+
+  const ATTACH_MAX_TOTAL = 20 * 1024 * 1024;
+  const UPLOAD_HEADER = "X-Crossjury-Upload";
+
+  function fileSize(bytes) {
+    if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    if (bytes >= 1024) return Math.round(bytes / 1024) + " KB";
+    return bytes + " B";
+  }
+
+  const KIND_TEXT = { pdf: "PDF", document: "Word", image: "Image" };
+
+  function attachmentDetails(a) {
+    const parts = [KIND_TEXT[a.kind] || a.kind, fileSize(a.size)];
+    if (a.pages !== null && a.pages !== undefined) parts.push(a.pages + (a.pages === 1 ? " page" : " pages"));
+    if (a.image_width && a.image_height) parts.push(a.image_width + " \u00d7 " + a.image_height + " px");
+    return parts.join(" \u00b7 ");
+  }
+
+  function attachmentIds() {
+    return state.attachments.map((a) => a.id);
+  }
+
+  function renderAttachments() {
+    const list = $("attach-list");
+    list.replaceChildren(...state.attachments.map((a) => el("li", { class: "attach-item" }, [
+      el("div", { class: "attach-main" }, [
+        el("span", { class: "attach-name", text: a.filename }),
+        el("span", { class: "muted", text: attachmentDetails(a) }),
+        el("button", { type: "button", class: "btn btn-small attach-remove", text: "Remove",
+          "aria-label": "Remove " + a.filename, disabled: state.busy, onclick: () => removeAttachment(a.id) }),
+      ]),
+      ...a.warnings.map((w) => el("div", { class: "attach-warn", text: w })),
+    ])));
+    if (state.uploading) list.append(el("li", { class: "attach-item muted" }, [el("span", { class: "spinner" }), "Uploading\u2026"]));
+    list.hidden = list.childElementCount === 0;
+    renderPrivacy();
+  }
+
+  // ADR 0007: before a run, list every vendor that will receive the files.
+  function renderPrivacy() {
+    const box = $("attach-privacy");
+    if (!state.attachments.length) { box.hidden = true; box.textContent = ""; return; }
+    const vendors = Array.from(new Set(selections().map((s) => providerLabel(s.provider))));
+    box.textContent = vendors.length
+      ? "These files will be sent to: " + vendors.join(", ") + "."
+      : "Select models to see which vendors will receive these files.";
+    box.hidden = false;
+  }
+
+  async function uploadFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length || state.busy) return;
+    showMessage("");
+    const known = state.attachments.reduce((n, a) => n + a.size, 0);
+    const added = files.reduce((n, f) => n + f.size, 0);
+    if (known + added > ATTACH_MAX_TOTAL) {
+      showMessage("Attachments are limited to 20 MB in total per run.");
+      return;
+    }
+    const form = new FormData();
+    for (const f of files) form.append("files", f, f.name);
+    state.uploading += 1;
+    renderAttachments();
+    updateButtons();
+    try {
+      const response = await fetch("/api/attachments", { method: "POST", headers: { [UPLOAD_HEADER]: "1" }, body: form });
+      let data = null;
+      try { data = await response.json(); } catch (_) { data = null; }
+      if (!response.ok) throw new Error(describeError(response.status, data));
+      for (const a of data.attachments) {
+        if (!state.attachments.some((x) => x.id === a.id)) state.attachments.push(a);
+      }
+    } catch (error) {
+      showMessage(error.message);
+    } finally {
+      state.uploading -= 1;
+      renderAttachments();
+      invalidateEstimate();
+    }
+  }
+
+  async function removeAttachment(id) {
+    state.attachments = state.attachments.filter((a) => a.id !== id);
+    renderAttachments();
+    invalidateEstimate();
+    // Keep files that the step-2 panel still needs; the server deletes them after 24 h.
+    if (syn.material && syn.material.attachment_ids.includes(id)) return;
+    try {
+      await fetch("/api/attachments/" + encodeURIComponent(id), { method: "DELETE" });
+    } catch (_) { /* expires on its own */ }
+  }
+
+  function initAttachments() {
+    const input = $("attach-input");
+    $("attach-btn").addEventListener("click", () => input.click());
+    input.addEventListener("change", () => { uploadFiles(input.files); input.value = ""; });
+    const panel = $("task-panel");
+    const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+    panel.addEventListener("dragover", (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      panel.classList.add("drop-target");
+    });
+    panel.addEventListener("dragleave", (e) => {
+      if (!panel.contains(e.relatedTarget)) panel.classList.remove("drop-target");
+    });
+    panel.addEventListener("drop", (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      panel.classList.remove("drop-target");
+      uploadFiles(e.dataTransfer.files);
+    });
+  }
+
+  // Delivery badges: how a member receives (or would receive) each file.
+  const MODE_TEXT = { native: "native", text: "as text", refused: "not sent" };
+  const MODE_CLASS = { native: "badge-ok", text: "badge-info", refused: "badge-error" };
+
+  function deliveryList(items) {
+    if (!items || !items.length) return null;
+    return el("ul", { class: "plain attach-modes" }, items.map((r) => el("li", {}, [
+      el("span", { class: "badge " + (MODE_CLASS[r.mode] || ""), text: MODE_TEXT[r.mode] || r.mode }),
+      " ", el("span", { class: "attach-name", text: r.filename }),
+      ...r.warnings.map((w) => el("div", { class: "attach-warn", text: w })),
+    ])));
+  }
+
   // ------------------------------------------------------------------ estimate
 
   function onSelectionChange() {
@@ -318,6 +454,7 @@
     state.estimate = null;
     state.estimateKey = null;
     $("estimate").hidden = true;
+    renderPrivacy();
     updateButtons();
   }
 
@@ -327,11 +464,14 @@
     const consentNeeded = needsConsent(req);
     $("consent-box").hidden = !consentNeeded;
     const consented = !consentNeeded || $("consent").checked;
-    $("estimate-btn").disabled = state.busy || !ready;
+    const uploading = state.uploading > 0;
+    $("estimate-btn").disabled = state.busy || uploading || !ready;
     const estimateValid = state.estimate && state.estimateKey === JSON.stringify(req);
-    $("run-btn").disabled = state.busy || !estimateValid || state.estimate.budget.refused || !consented;
+    $("run-btn").disabled = state.busy || uploading || !estimateValid || state.estimate.budget.refused || !consented;
+    $("attach-btn").disabled = state.busy;
     const hint = $("action-hint");
-    if (!ready) hint.textContent = "Enter a task and pick at least one model.";
+    if (uploading) hint.textContent = "Uploading files\u2026";
+    else if (!ready) hint.textContent = "Enter a task and pick at least one model.";
     else if (!estimateValid) hint.textContent = "Estimate the cost before running.";
     else if (state.estimate.budget.refused) hint.textContent = "The budget refuses this run.";
     else if (!consented) hint.textContent = "Tick the consent box to run subscription models.";
@@ -359,6 +499,16 @@
     if (est.cli_calls) {
       box.append(el("p", { class: "estimate-note muted", text:
         "Subscription calls have unknown cost and count against your plan's usage limits; budget limits apply to priced calls only." }));
+    }
+    const attachLines = est.attachments || [];
+    if (attachLines.length) {
+      box.append(el("p", { class: "estimate-note", text: "Attachments (estimated input tokens per model):" }));
+      box.append(el("ul", { class: "estimate-lines" }, attachLines.map((a) =>
+        el("li", { text: providerLabel(a.provider) + (a.backend === "cli" ? " (subscription)" : "") +
+          " \u00b7 " + a.filename + ": " + (a.mode === "refused"
+            ? "not sent (cannot be read by this model)"
+            : (a.mode === "native" ? "native" : "as text") + ", \u2248 " + tokens(a.tokens) + " tok" +
+              (a.vendor_counted ? " (total counted by the vendor)" : "")) }))));
     }
     for (const w of est.warnings) box.append(el("p", { class: "estimate-note note-warn", text: w }));
     if (b.refused) {
@@ -441,6 +591,7 @@
           el("div", { class: "result-model", text: modelLine(m.model, m.backend) }),
           meta.length ? el("div", { class: "result-meta" }, meta.map((t) => el("span", { text: t }))) : null,
         ]),
+        deliveryList(m.attachments),
         m.error !== null
           ? el("div", { class: "result-error", text: "Error: " + m.error })
           : el("div", { class: "result-body", text: m.text }),
@@ -470,6 +621,7 @@
     if (needsConsent(req) && !consent) return;
     showMessage("");
     state.busy = true;
+    renderAttachments();
     updateButtons();
     resetSynthesis();
     renderPending(req);
@@ -477,12 +629,13 @@
       const body = Object.assign({}, req, { confirmed: confirmed, allow_unknown_cost: consent });
       const result = await api("/api/run", body);
       renderResults(result);
-      setupSynthesis(req.task, result);
+      setupSynthesis(req.task, result, req.attachment_ids);
     } catch (error) {
       $("results-section").hidden = true;
       showMessage(error.message);
     } finally {
       state.busy = false;
+      renderAttachments();
       $("consent").checked = false;  // consent is given per run
       invalidateEstimate();  // spend changed: a new run needs a fresh estimate
       refreshBudget();
@@ -500,7 +653,7 @@
   const ICON_WRONG = "\u274c";
 
   const syn = {
-    material: null,      // { task, answers: [{provider, backend, model, text}] }
+    material: null,      // { task, answers: [{provider, backend, model, text}], attachment_ids }
     runSettings: null,   // settings snapshot of the current synthesis
     seed: null,
     chair: null,         // { provider, model_id }
@@ -581,6 +734,7 @@
       review_tier: tier ? tier.value : "economy",
       extra_instructions: extra.trim() === "" ? null : extra,
       allow_unknown_cost: synConsented(),
+      attachment_ids: syn.material.attachment_ids,
     };
   }
 
@@ -613,8 +767,9 @@
     synStatus("");
   }
 
-  function setupSynthesis(task, result) {
+  function setupSynthesis(task, result, attachmentIdsUsed) {
     resetSynthesis();
+    const ids = attachmentIdsUsed || [];
     const answers = result.members
       .filter((m) => m.error === null && typeof m.text === "string" && m.text.trim() !== "")
       .map((m) => ({ provider: m.provider, backend: m.backend, model: m.model, text: m.text }));
@@ -626,7 +781,13 @@
       $("syn-unavailable").textContent = "AI synthesis needs at least two successful answers.";
       return;
     }
-    syn.material = { task: task, answers: answers };
+    syn.material = { task: task, answers: answers, attachment_ids: ids };
+    const note = $("syn-attach-note");
+    note.textContent = ids.length
+      ? "Only the chair model receives the " + ids.length + " attached file" + (ids.length === 1 ? "" : "s") +
+        "; the agreement judge and the reviewers see the answers only."
+      : "";
+    note.hidden = !ids.length;
     syn.seed = null;
     syn.chair = null;
     syn.chairBackend = null;
@@ -1207,6 +1368,7 @@
     $("estimate-btn").addEventListener("click", onEstimate);
     $("run-btn").addEventListener("click", onRun);
     $("consent").addEventListener("change", updateButtons);
+    initAttachments();
     initSynthesis();
     await loadProviders(false);
   }

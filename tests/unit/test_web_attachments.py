@@ -322,3 +322,14 @@ def test_synthesis_estimate_accepts_attachment_ids(
     assert [a.sha256 for a in seen["attachments"]] == [attachment_id]
     expired = client.post("/api/synthesis/estimate", json={**body, "attachment_ids": ["1" * 64]})
     assert expired.status_code == 400
+
+
+def test_page_offers_attachments_with_the_upload_header() -> None:
+    client = _client(_deps(None))
+    page = client.get("/").text
+    script = client.get("/app.js").text
+    assert 'id="attach-input"' in page
+    assert ".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif" in page
+    assert UPLOAD_HEADER.lower() in script.lower()
+    assert "These files will be sent to: " in script
+    assert "attachment_ids" in script
