@@ -13,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from llm_crossjury.core.orchestrator.topology import ReviewTopology
 from llm_crossjury.core.providers.base import Backend, ReasoningEffort
@@ -162,7 +162,12 @@ class CrossjuryConfig(BaseModel):
     output_language: str | None = None
     """BCP 47 tag (e.g. ``"de"``). ``None``: follow the language of the task/document.
     Internal prompt templates are always English."""
-    models_path: Path = Path("config/models.yaml")
+    models_path: Path = Field(
+        default=Path("config/models.yaml"),
+        # Pin the exported default to POSIX form; str(Path) would use "\\" on Windows
+        # and make the committed JSON Schema platform-dependent.
+        json_schema_extra={"default": "config/models.yaml"},
+    )
     store_content: bool = False
     """Persist prompt/response text in run records (see ARCHITECTURE §6)."""
     checkpoint_retention_days: int = 7

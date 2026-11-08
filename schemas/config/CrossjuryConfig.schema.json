@@ -452,7 +452,7 @@
       "title": "Output Language"
     },
     "models_path": {
-      "default": "config\\models.yaml",
+      "default": "config/models.yaml",
       "format": "path",
       "title": "Models Path",
       "type": "string"

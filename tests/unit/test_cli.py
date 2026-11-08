@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from typer.testing import CliRunner
 
 from llm_crossjury.cli.app import app
 
 runner = CliRunner()
+
+# Rich forces colour when CI/GITHUB_ACTIONS is set; ANSI codes can split option names.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 @pytest.mark.parametrize(
@@ -31,4 +36,4 @@ def test_help(args: list[str]) -> None:
 def test_models_refresh_has_draft_option() -> None:
     result = runner.invoke(app, ["models", "refresh", "--help"])
     assert result.exit_code == 0
-    assert "--draft" in result.output
+    assert "--draft" in _ANSI.sub("", result.output)
