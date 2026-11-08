@@ -11,7 +11,17 @@ Verified against (2026-11-08):
   ``stop_reason``, ``usage`` incl. ``output_tokens_details.thinking_tokens``).
 * Prompt caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
   (``"cache_control": {"type": "ephemeral"}`` on the last content block of the
-  cached prefix; ``input_tokens`` counts only tokens after the last breakpoint).
+  cached prefix; ``input_tokens`` counts only tokens after the last breakpoint; at
+  most 4 breakpoints per request, one of them taken by automatic caching if used;
+  image and document blocks in user turns may carry ``cache_control``).
+* PDF support: https://platform.claude.com/docs/en/build-with-claude/pdf-support
+  (``{"type": "document", "source": {"type": "base64", "media_type":
+  "application/pdf", "data": ...}}``, optional ``title``; place PDFs before text;
+  request size and page limits apply to the whole request).
+* Vision: https://platform.claude.com/docs/en/build-with-claude/vision
+  (``{"type": "image", "source": {"type": "base64", "media_type": ..., "data":
+  ...}}`` for ``image/jpeg``, ``image/png``, ``image/gif``, ``image/webp``; images
+  work best before text).
 * Token counting: https://platform.claude.com/docs/en/build-with-claude/token-counting
   (``client.messages.count_tokens(...)`` returns ``input_tokens``; free of charge).
 * Structured outputs: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
@@ -29,13 +39,20 @@ from typing import Any
 
 from llm_crossjury.core.providers.api._common import (
     ApiProviderBase,
+    attachment_base64,
+    attachment_mode,
     deep_merge,
+    fallback_text_block,
+    iter_attachments,
     sanitize_error,
     suffix_with_format_instructions,
     utc_now,
+    validate_attachment_roles,
     validate_prompt,
 )
 from llm_crossjury.core.providers.base import (
+    Attachment,
+    AttachmentKind,
     Capabilities,
     CompletionRequest,
     CompletionResult,
@@ -69,8 +86,51 @@ def _text_block(text: str) -> dict[str, Any]:
     return {"type": "text", "text": text}
 
 
+def _attachment_block(
+    attachment: Attachment, input_modalities: frozenset[AttachmentKind], model: str
+) -> dict[str, Any]:
+    """One content block for ``attachment`` (ADR 0007).
+
+    Native (kind declared in ``input_modalities``, never ``DOCUMENT``): an inline
+    base64 ``document`` block for PDFs (with ``title`` = file name) or an ``image``
+    block for images. Otherwise the canonical fallback text block.
+
+    Raises:
+        CapabilityNotSupportedError: no native support and no ``fallback_text``.
+    """
+    mode = attachment_mode(attachment, input_modalities, provider="anthropic", model=model)
+    if mode == "text":
+        return _text_block(fallback_text_block(attachment))
+    source = {
+        "type": "base64",
+        "media_type": attachment.media_type,
+        "data": attachment_base64(attachment),
+    }
+    if attachment.kind is AttachmentKind.PDF:
+        return {"type": "document", "source": source, "title": attachment.filename}
+    return {"type": "image", "source": source}
+
+
+def _content_blocks(
+    message: Message, input_modalities: frozenset[AttachmentKind], model: str
+) -> list[dict[str, Any]]:
+    """Attachment blocks first (the docs recommend files before text), then the text.
+
+    The text block is omitted when the content is empty and attachments exist:
+    Anthropic rejects empty text blocks.
+    """
+    blocks = [_attachment_block(a, input_modalities, model) for a in message.attachments]
+    if message.content or not blocks:
+        blocks.append(_text_block(message.content))
+    return blocks
+
+
 def build_messages_params(
-    request: CompletionRequest, *, native_structured_output: bool, for_counting: bool = False
+    request: CompletionRequest,
+    *,
+    native_structured_output: bool,
+    for_counting: bool = False,
+    input_modalities: frozenset[AttachmentKind] = frozenset(),
 ) -> dict[str, Any]:
     """Build the ``messages.create`` kwargs for ``request`` (without ``timeout``).
 
@@ -79,11 +139,16 @@ def build_messages_params(
     * System messages (only allowed in ``stable_prefix``) become ``system`` text
       blocks, in order.
     * All other messages become ``messages``; consecutive messages with the same
-      role are merged into one message with several text blocks.
+      role are merged into one message with several content blocks.
+    * Attachments (user messages only) become content blocks placed before the
+      message's text block: native ``document``/``image`` blocks with inline base64
+      when the kind is in ``input_modalities``, else the canonical fallback text
+      block (see :func:`_attachment_block`). No Files API is used.
     * If ``cache_prefix`` is set, the last content block that comes from
       ``stable_prefix`` gets ``cache_control: {"type": "ephemeral"}``: the last
-      prefix message block if the prefix has non-system messages, otherwise the last
-      system block.
+      block of the last non-system prefix message (an attachment block or a text
+      block) if the prefix has any, otherwise the last system block. Exactly one
+      breakpoint is set, well within the documented limit of 4.
     * ``response_schema`` goes to ``output_config.format`` when
       ``native_structured_output``; otherwise format instructions are appended to
       the last user message of the suffix.
@@ -95,13 +160,18 @@ def build_messages_params(
         native_structured_output: Send ``response_schema`` natively.
         for_counting: Build params for ``count_tokens``: ``max_tokens`` is neither
             required nor included.
+        input_modalities: Attachment kinds the model accepts natively.
 
     Raises:
         ProviderError: if ``max_output_tokens`` is ``None`` when generating
-            (Anthropic requires ``max_tokens``) or the prompt violates its invariants.
+            (Anthropic requires ``max_tokens``), the prompt violates its invariants
+            or a non-user message carries attachments.
+        CapabilityNotSupportedError: an attachment can be sent neither natively nor
+            as text.
     """
     prompt = request.prompt
     validate_prompt(prompt.stable_prefix, prompt.variable_suffix)
+    validate_attachment_roles((*prompt.stable_prefix, *prompt.variable_suffix))
     if request.max_output_tokens is None and not for_counting:
         raise ProviderError("anthropic requires max_output_tokens (max_tokens); none was given")
 
@@ -114,12 +184,12 @@ def build_messages_params(
     last_prefix_block: dict[str, Any] | None = None
 
     def add(message: Message) -> dict[str, Any]:
-        block = _text_block(message.content)
+        blocks = _content_blocks(message, input_modalities, request.model)
         if messages and messages[-1]["role"] == message.role.value:
-            messages[-1]["content"].append(block)
+            messages[-1]["content"].extend(blocks)
         else:
-            messages.append({"role": message.role.value, "content": [block]})
-        return block
+            messages.append({"role": message.role.value, "content": blocks})
+        return blocks[-1]
 
     last_system_block: dict[str, Any] | None = None
     for message in prompt.stable_prefix:
@@ -204,6 +274,11 @@ def _response_text(response: Any) -> str:
     )
 
 
+def _all_attachments(request: CompletionRequest) -> tuple[Attachment, ...]:
+    prompt = request.prompt
+    return tuple(iter_attachments((*prompt.stable_prefix, *prompt.variable_suffix)))
+
+
 class AnthropicApiProvider(ApiProviderBase):
     """Claude models through the Anthropic Messages API.
 
@@ -215,6 +290,9 @@ class AnthropicApiProvider(ApiProviderBase):
     * Structured output: native ``output_config.format`` when the registry entry
       says ``structured_output: true``, else the format-instruction fallback.
     * Token counting: the free ``messages.count_tokens`` endpoint.
+    * Attachments (ADR 0007): inline base64 ``document`` (PDF) and ``image`` blocks
+      where the registry declares the kind, else fallback text; see
+      :func:`build_messages_params`.
     * Batches: not implemented (MVP).
     """
 
@@ -238,9 +316,18 @@ class AnthropicApiProvider(ApiProviderBase):
 
     async def complete(self, request: CompletionRequest) -> CompletionResult:
         """Run one ``messages.create`` call. See :func:`build_messages_params` and
-        :func:`map_usage` for the request and usage mapping."""
-        native = self.capabilities(request.model).structured_output
-        params = build_messages_params(request, native_structured_output=native)
+        :func:`map_usage` for the request and usage mapping.
+
+        ``native_params_used`` echoes ``request.native_params`` only; attachment
+        data never appears in it or in error messages.
+        """
+        caps = self.capabilities(request.model)
+        params = build_messages_params(
+            request,
+            native_structured_output=caps.structured_output,
+            input_modalities=caps.input_modalities,
+        )
+        attachments = _all_attachments(request)
         api_key = self._api_key()
         started_at = utc_now()
         start = time.perf_counter()
@@ -253,7 +340,7 @@ class AnthropicApiProvider(ApiProviderBase):
         except ProviderError:
             raise
         except Exception as exc:
-            raise sanitize_error(self.name, exc, api_key) from None
+            raise sanitize_error(self.name, exc, api_key, attachments=attachments) from None
         finally:
             await client.close()
         latency = time.perf_counter() - start
@@ -273,11 +360,19 @@ class AnthropicApiProvider(ApiProviderBase):
     async def count_input_tokens(self, request: CompletionRequest) -> int | None:
         """Count input tokens with ``messages.count_tokens`` (free; an estimate).
 
-        Uses the same request mapping as :meth:`complete`, restricted to the keys the
-        counting endpoint accepts.
+        Uses the same request mapping as :meth:`complete` (attachments included in
+        the same native or fallback form), restricted to the keys the counting
+        endpoint accepts. The endpoint accepts image and document blocks
+        (https://platform.claude.com/docs/en/build-with-claude/token-counting).
         """
-        native = self.capabilities(request.model).structured_output
-        params = build_messages_params(request, native_structured_output=native, for_counting=True)
+        caps = self.capabilities(request.model)
+        params = build_messages_params(
+            request,
+            native_structured_output=caps.structured_output,
+            for_counting=True,
+            input_modalities=caps.input_modalities,
+        )
+        attachments = _all_attachments(request)
         count_params = {k: v for k, v in params.items() if k in _COUNT_TOKENS_KEYS}
         api_key = self._api_key()
         client = self._make_client(api_key)
@@ -289,7 +384,7 @@ class AnthropicApiProvider(ApiProviderBase):
         except ProviderError:
             raise
         except Exception as exc:
-            raise sanitize_error(self.name, exc, api_key) from None
+            raise sanitize_error(self.name, exc, api_key, attachments=attachments) from None
         finally:
             await client.close()
         count = getattr(response, "input_tokens", None)
