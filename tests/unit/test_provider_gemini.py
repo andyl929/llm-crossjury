@@ -214,6 +214,7 @@ def test_capabilities_without_registry() -> None:
         "batch": False,
         "temperature": True,
         "reasoning": False,
+        "input_modalities": frozenset(),
     }
 
 
@@ -225,6 +226,7 @@ def test_capabilities_from_registry_entry() -> None:
         "batch": False,
         "temperature": True,
         "reasoning": True,
+        "input_modalities": frozenset(),
     }
     caps = _provider(_entry(structured=None, control=ReasoningControlType.NONE)).capabilities(MODEL)
     assert caps.structured_output is False

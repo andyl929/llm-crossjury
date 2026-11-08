@@ -197,6 +197,7 @@ def test_capabilities_without_registry_are_all_false() -> None:
         "batch": False,
         "temperature": False,
         "reasoning": False,
+        "input_modalities": frozenset(),
     }
 
 
