@@ -101,6 +101,45 @@ def test_structured_call_retries_once_with_feedback() -> None:
     assert "could not be used" in retry.prompt.variable_suffix[-1].content
 
 
+def _empty_budget_result() -> CompletionResult:
+    return _result("").model_copy(
+        update={
+            "finish_reason": "max_tokens",
+            "usage": Usage(
+                input_tokens=10,
+                cached_input_tokens=0,
+                cache_write_tokens=0,
+                output_tokens=0,
+                reasoning_tokens=100,
+            ),
+        }
+    )
+
+
+def test_budget_exhausted_reply_is_retried_with_more_room() -> None:
+    seen: list[CallSpec] = []
+
+    async def call(spec: CallSpec) -> CompletionResult:
+        seen.append(spec)
+        return _empty_budget_result() if len(seen) == 1 else _result(VALID)
+
+    parsed, results = asyncio.run(structured_call(call, _spec(), AgreementJudgment))
+    assert parsed.groups[0].statement == "x"
+    assert len(results) == 2
+    assert seen[1].max_output_tokens == 200  # doubled
+    assert seen[1].prompt == seen[0].prompt  # no corrective message needed
+
+
+def test_final_error_carries_diagnostics_without_text() -> None:
+    async def call(spec: CallSpec) -> CompletionResult:
+        return _empty_budget_result()
+
+    with pytest.raises(
+        StructuredOutputError, match=r"finish_reason=max_tokens.*reasoning_tokens=100"
+    ):
+        asyncio.run(structured_call(call, _spec(), AgreementJudgment))
+
+
 def test_structured_call_gives_up_after_retry() -> None:
     async def call(spec: CallSpec) -> CompletionResult:
         return _result("still not json")

@@ -20,6 +20,8 @@ from llm_crossjury.core.synthesis.types import CallFn, CallSpec
 M = TypeVar("M", bound=BaseModel)
 
 _MAX_ERROR_CHARS = 1500
+_MAX_RETRY_OUTPUT_TOKENS = 32_000
+"""Upper bound for the doubled output budget on a budget-exhausted retry."""
 _RETRY_INSTRUCTION = (
     "Your previous reply could not be used: {error}\n\n"
     "Reply again with only one JSON object that satisfies the required schema. "
@@ -88,13 +90,46 @@ async def structured_call(
         return parse_structured(first.text, model_cls), [first]
     except StructuredOutputError as exc:
         error = str(exc)
-    retry_prompt = Prompt(
-        stable_prefix=spec.prompt.stable_prefix,
-        variable_suffix=(
-            *spec.prompt.variable_suffix,
-            Message(role=Role.ASSISTANT, content=first.text or "(empty reply)"),
-            Message(role=Role.USER, content=_RETRY_INSTRUCTION.format(error=error)),
-        ),
+    if budget_exhausted(first, spec.max_output_tokens):
+        # The model spent the whole output budget (typically on hidden reasoning) and
+        # wrote nothing usable: a corrective message would not help, more room does.
+        retry_spec = replace(
+            spec,
+            max_output_tokens=min(spec.max_output_tokens * 2, _MAX_RETRY_OUTPUT_TOKENS),
+            tag=f"{spec.tag}:retry",
+        )
+    else:
+        retry_prompt = Prompt(
+            stable_prefix=spec.prompt.stable_prefix,
+            variable_suffix=(
+                *spec.prompt.variable_suffix,
+                Message(role=Role.ASSISTANT, content=first.text or "(empty reply)"),
+                Message(role=Role.USER, content=_RETRY_INSTRUCTION.format(error=error)),
+            ),
+        )
+        retry_spec = replace(spec, prompt=retry_prompt, tag=f"{spec.tag}:retry")
+    second = await call(retry_spec)
+    try:
+        return parse_structured(second.text, model_cls), [first, second]
+    except StructuredOutputError as exc:
+        raise StructuredOutputError(f"{exc} ({describe_result(second)})") from None
+
+
+def budget_exhausted(result: CompletionResult, max_output_tokens: int) -> bool:
+    """Return ``True`` if the reply is empty because the output budget ran out."""
+    if result.text.strip():
+        return False
+    reason = (result.finish_reason or "").lower()
+    if "max" in reason or "length" in reason:
+        return True
+    reasoning = result.usage.reasoning_tokens or 0
+    return (result.usage.output_tokens or 0) == 0 and reasoning >= 0.9 * max_output_tokens
+
+
+def describe_result(result: CompletionResult) -> str:
+    """Diagnostics for an unusable reply. Contains no reply text."""
+    usage = result.usage
+    return (
+        f"model {result.model}, finish_reason={result.finish_reason}, "
+        f"output_tokens={usage.output_tokens}, reasoning_tokens={usage.reasoning_tokens}"
     )
-    second = await call(replace(spec, prompt=retry_prompt, tag=f"{spec.tag}:retry"))
-    return parse_structured(second.text, model_cls), [first, second]

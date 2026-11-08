@@ -53,6 +53,7 @@ import random
 import secrets
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -86,6 +87,7 @@ from llm_crossjury.core.compare_service import (
     provider_names,
     require_consent,
 )
+from llm_crossjury.core.config import RolesConfig
 from llm_crossjury.core.cost.estimate import CallPlan, CostEstimate
 from llm_crossjury.core.cost.ledger import BudgetExceededError
 from llm_crossjury.core.cost.pricing import PricingError
@@ -131,6 +133,14 @@ _STAGE_ROLES: dict[str, ModelRole] = {
     review.STAGE: ModelRole.REVIEWER,
     chair.STAGE: ModelRole.CHAIRMAN,
 }
+_ROLES = RolesConfig()
+_ROLE_REASONING: dict[ModelRole, ReasoningEffort] = {
+    ModelRole.AGREEMENT_JUDGE: _ROLES.agreement_judge.reasoning,
+    ModelRole.REVIEWER: _ROLES.reviewer.reasoning,
+    ModelRole.CHAIRMAN: _ROLES.chairman.reasoning,
+}
+"""Role defaults (SPEC §5.1): judge and reviewers ``low``, chair ``default``. A level the
+model cannot take is downgraded to ``default`` by the resolver (normal mode)."""
 _RUN_ID_PATTERN = r"^[0-9a-f]{32}$"
 
 
@@ -567,7 +577,9 @@ def _resolve(
         model=model_id,
         backend=backend,
         role=_STAGE_ROLES.get(stage, ModelRole.ANSWERER),
-        reasoning=ReasoningEffort.DEFAULT,
+        reasoning=_ROLE_REASONING.get(
+            _STAGE_ROLES.get(stage, ModelRole.ANSWERER), ReasoningEffort.DEFAULT
+        ),
         native=None,
     )
 
@@ -778,6 +790,9 @@ def make_call_fn(
         )
         price = checked_price(spec.provider, resolved.model_id, backend, deps)
         prompt = inline_attachments(spec.prompt) if backend is Backend.CLI else spec.prompt
+        entry = deps.registry.get(spec.provider, resolved.model_id)
+        if entry is not None and entry.max_output and spec.max_output_tokens > entry.max_output:
+            spec = replace(spec, max_output_tokens=entry.max_output)
         call_high = Decimal(0)
         if price is not None:
             caps = deps.providers[(spec.provider, backend)].capabilities(resolved.model_id)
