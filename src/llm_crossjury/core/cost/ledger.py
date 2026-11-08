@@ -156,5 +156,43 @@ def compute_cost(usage: Usage, price: Pricing, *, batched: bool) -> Decimal | No
     """Compute the cost of ``usage`` under ``price``.
 
     Returns ``None`` if any usage field needed for the computation is unknown.
+
+    All five usage fields carry a rate (with the documented fallbacks to the input or
+    output rate), so all five are needed; ``None`` never means zero. A ``batched``
+    call on a model without ``batch_multiplier`` also returns ``None``. The result is
+    in ``price.currency`` and is not rounded.
+
+    Args:
+        usage: Token counts reported for the call.
+        price: Verified price, e.g. from :meth:`PricingTable.lookup`.
+        batched: Whether the call went through the vendor's batch API.
     """
-    raise NotImplementedError
+    counts = (
+        usage.input_tokens,
+        usage.cached_input_tokens,
+        usage.cache_write_tokens,
+        usage.output_tokens,
+        usage.reasoning_tokens,
+    )
+    if any(c is None for c in counts):
+        return None
+    if batched and price.batch_multiplier is None:
+        return None
+    inp, cached, written, out, reasoning = (int(c or 0) for c in counts)
+    total = (
+        inp * price.input_per_mtok
+        + cached * _or(price.cached_input_per_mtok, price.input_per_mtok)
+        + written * _or(price.cache_write_per_mtok, price.input_per_mtok)
+        + out * price.output_per_mtok
+        + reasoning * _or(price.reasoning_per_mtok, price.output_per_mtok)
+    ) / _MTOK
+    if batched and price.batch_multiplier is not None:
+        total *= price.batch_multiplier
+    return total
+
+
+_MTOK = Decimal(1_000_000)
+
+
+def _or(rate: Decimal | None, fallback: Decimal) -> Decimal:
+    return fallback if rate is None else rate
