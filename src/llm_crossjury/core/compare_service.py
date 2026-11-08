@@ -294,9 +294,13 @@ class EstimatorLike(Protocol):
 
 
 class AttachmentStoreLike(Protocol):
-    """The part of :class:`AttachmentStore` the services use."""
+    """The part of :class:`AttachmentStore` the services and the upload API use."""
 
     def get(self, attachment_id: str) -> BuiltAttachment: ...
+
+    def put(self, built: BuiltAttachment) -> str: ...
+
+    def delete(self, attachment_id: str) -> bool: ...
 
 
 class LedgerLike(Protocol):

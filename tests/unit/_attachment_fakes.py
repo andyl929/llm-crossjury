@@ -61,6 +61,13 @@ class MemoryStore:
             self.items[item.attachment.sha256] = item
         return [item.attachment.sha256 for item in items]
 
+    def put(self, item: BuiltAttachment) -> str:
+        self.items[item.attachment.sha256] = item
+        return item.attachment.sha256
+
+    def delete(self, attachment_id: str) -> bool:
+        return self.items.pop(attachment_id, None) is not None
+
     def get(self, attachment_id: str) -> BuiltAttachment:
         try:
             return self.items[attachment_id]

@@ -8,9 +8,14 @@ Serves one static page (vanilla HTML/CSS/JS, no build step) and a small JSON API
   CLI provider's ``check()`` (run concurrently on request, cached briefly, never at
   startup; ``?refresh=true`` re-checks), and the effective budget.
 * ``POST /api/estimate``: the cost range of the priced calls, the number of CLI calls
-  (unknown cost) and the budget verdict (confirmation needed, or refused).
-* ``POST /api/run``: runs the comparison and returns every member's result. A run with
-  CLI members needs ``allow_unknown_cost`` (409 ``consent_required`` otherwise).
+  (unknown cost), per-attachment token lines and the budget verdict (confirmation
+  needed, or refused).
+* ``POST /api/run``: runs the comparison and returns every member's result, including
+  how each member received each attachment. A run with CLI members needs
+  ``allow_unknown_cost`` (409 ``consent_required`` otherwise).
+* ``POST /api/attachments`` (multipart) and ``DELETE /api/attachments/{id}``: upload
+  and remove task attachments (see :mod:`llm_crossjury.web.attachments_api`); estimate,
+  run and synthesis requests refer to them by ``attachment_ids``.
 * ``POST /api/synthesis/{estimate,agreement,finish,resynthesize-estimate,resynthesize}``:
   the stateless AI synthesis upgrade of a finished comparison (see
   :mod:`llm_crossjury.core.synthesis_service`). The client posts the step-1 material
@@ -18,8 +23,9 @@ Serves one static page (vanilla HTML/CSS/JS, no build step) and a small JSON API
 
 The app is meant to listen on localhost. As defense in depth against other web pages
 in the user's browser, it checks the ``Host`` header (DNS rebinding), requires JSON
-bodies for POST (forcing a CORS preflight, which is never granted), and rejects
-cross-origin POSTs.
+bodies for POST (forcing a CORS preflight, which is never granted; the upload route
+alone accepts multipart and requires a custom header instead), and rejects
+cross-origin POSTs and DELETEs.
 """
 
 from __future__ import annotations
@@ -40,8 +46,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from llm_crossjury.core.attachments import AttachmentError, AttachmentTooLargeError
+from llm_crossjury.core.attachments.store import AttachmentNotFoundError
 from llm_crossjury.core.compare_service import (
     DEFAULT_MAX_OUTPUT_TOKENS,
+    MAX_ATTACHMENTS,
+    AttachmentEstimateLine,
     BudgetRefusedError,
     BudgetStatus,
     CompareDeps,
@@ -51,6 +61,7 @@ from llm_crossjury.core.compare_service import (
     SelectionError,
     budget_status,
     estimate_compare,
+    estimate_compare_details,
     key_is_set,
     provider_names,
     run_compare,
@@ -75,6 +86,7 @@ from llm_crossjury.core.synthesis_service import (
     run_finish_step,
     run_resynthesis,
 )
+from llm_crossjury.web.attachments_api import UPLOAD_PATH, create_attachments_router
 from llm_crossjury.web.settings_api import create_settings_router
 
 LOOPBACK_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
@@ -252,6 +264,8 @@ class ProvidersResponse(_Frozen):
 class CompareRequest(_Frozen):
     task: str = Field(max_length=MAX_TASK_CHARS)
     selections: tuple[Selection, ...]
+    attachment_ids: tuple[str, ...] = Field(default=(), max_length=MAX_ATTACHMENTS)
+    """Uploaded attachments (``POST /api/attachments``) sent to every member."""
 
 
 class RunRequest(CompareRequest):
@@ -278,6 +292,8 @@ class EstimateResponse(_Frozen):
     """Range of the priced (``api``) calls only."""
     cli_calls: int
     lines: tuple[EstimateLineOut, ...]
+    attachments: tuple[AttachmentEstimateLine, ...] = ()
+    """Per member and attachment: delivery mode and estimated input tokens."""
     warnings: tuple[str, ...]
     assumptions: tuple[str, ...]
     budget: BudgetStatus
@@ -530,6 +546,43 @@ def _add_synthesis_routes(app: FastAPI, deps: Callable[[], CompareDeps]) -> None
         return await run_resynthesis(body, d)
 
 
+def _add_error_handlers(app: FastAPI) -> None:
+    """Map service errors to JSON error responses."""
+
+    @app.exception_handler(SelectionError)
+    async def _selection_error(request: Request, exc: SelectionError) -> JSONResponse:
+        return _error(400, "invalid_selection", str(exc))
+
+    @app.exception_handler(ResolutionError)
+    async def _resolution_error(request: Request, exc: ResolutionError) -> JSONResponse:
+        return _error(400, "resolution", f"Model resolution failed: {exc}")
+
+    @app.exception_handler(PricingError)
+    async def _pricing_error(request: Request, exc: PricingError) -> JSONResponse:
+        return _error(400, "pricing", f"Pricing refused the run: {exc}")
+
+    @app.exception_handler(ConsentRequiredError)
+    async def _consent_required(request: Request, exc: ConsentRequiredError) -> JSONResponse:
+        return _consent_error(exc)
+
+    @app.exception_handler(BudgetRefusedError)
+    async def _budget_error(request: Request, exc: BudgetRefusedError) -> JSONResponse:
+        return _error(409, "budget_refused", str(exc), exc.status)
+
+    @app.exception_handler(AttachmentError)
+    async def _attachment_error(request: Request, exc: AttachmentError) -> JSONResponse:
+        # Attachment messages never contain file content (see core.attachments.limits).
+        if isinstance(exc, AttachmentNotFoundError):
+            return _error(400, "attachment_not_found", f"{exc}.")
+        code = "attachment_too_large" if isinstance(exc, AttachmentTooLargeError) else "attachment"
+        return _error(400, code, f"Attachment refused: {exc}.")
+
+    @app.exception_handler(SynthesisStageError)
+    async def _stage_error(request: Request, exc: SynthesisStageError) -> JSONResponse:
+        status = 409 if exc.code == "budget_stopped" else 502
+        return _error(status, exc.code, str(exc))
+
+
 def create_app(
     deps_factory: DepsFactory,
     *,
@@ -573,10 +626,16 @@ def create_app(
         host = _host_name(request.headers.get("host", "")).lower()
         if "*" not in hosts and host not in hosts:
             return _error(400, "bad_host", "Host not allowed.")
-        if request.method == "POST":
+        if request.method in {"POST", "DELETE"}:
             content_type = request.headers.get("content-type", "")
-            if content_type.split(";", 1)[0].strip().lower() != "application/json":
-                return _error(415, "unsupported_media_type", "Send JSON.")
+            media = content_type.split(";", 1)[0].strip().lower()
+            # Only the upload route takes multipart (it requires its own header).
+            expected = (
+                "multipart/form-data" if request.url.path == UPLOAD_PATH else "application/json"
+            )
+            if request.method == "POST" and media != expected:
+                hint = "Send JSON." if expected == "application/json" else f"Send {expected}."
+                return _error(415, "unsupported_media_type", hint)
             origin = request.headers.get("origin")
             if (
                 origin is not None
@@ -588,30 +647,7 @@ def create_app(
             response.headers.setdefault(name, value)
         return response
 
-    @app.exception_handler(SelectionError)
-    async def _selection_error(request: Request, exc: SelectionError) -> JSONResponse:
-        return _error(400, "invalid_selection", str(exc))
-
-    @app.exception_handler(ResolutionError)
-    async def _resolution_error(request: Request, exc: ResolutionError) -> JSONResponse:
-        return _error(400, "resolution", f"Model resolution failed: {exc}")
-
-    @app.exception_handler(PricingError)
-    async def _pricing_error(request: Request, exc: PricingError) -> JSONResponse:
-        return _error(400, "pricing", f"Pricing refused the run: {exc}")
-
-    @app.exception_handler(ConsentRequiredError)
-    async def _consent_required(request: Request, exc: ConsentRequiredError) -> JSONResponse:
-        return _consent_error(exc)
-
-    @app.exception_handler(BudgetRefusedError)
-    async def _budget_error(request: Request, exc: BudgetRefusedError) -> JSONResponse:
-        return _error(409, "budget_refused", str(exc), exc.status)
-
-    @app.exception_handler(SynthesisStageError)
-    async def _stage_error(request: Request, exc: SynthesisStageError) -> JSONResponse:
-        status = 409 if exc.code == "budget_stopped" else 502
-        return _error(status, exc.code, str(exc))
+    _add_error_handlers(app)
 
     def page(path: str) -> Response:
         name = _STATIC_FILES[path]
@@ -643,8 +679,11 @@ def create_app(
     @app.post("/api/estimate")
     async def estimate(body: CompareRequest) -> EstimateResponse:
         d = deps()
-        est = await estimate_compare(body.task, body.selections, d)
-        warnings = tuple(w for r in est.resolved for w in r.warnings)
+        details = await estimate_compare_details(
+            body.task, body.selections, d, attachment_ids=body.attachment_ids
+        )
+        est = details.estimate
+        warnings = tuple(w for r in est.resolved for w in r.warnings) + details.refusals
         status = budget_status(est, d)
         return EstimateResponse(
             currency=est.currency or d.budget.currency,
@@ -662,6 +701,7 @@ def create_app(
                 )
                 for line in est.lines
             ),
+            attachments=details.attachments,
             warnings=warnings,
             assumptions=est.assumptions,
             budget=status,
@@ -670,7 +710,12 @@ def create_app(
     @app.post("/api/run", response_model=None)
     async def run(body: RunRequest) -> CompareResult | JSONResponse:
         d = deps()
-        status = budget_status(await estimate_compare(body.task, body.selections, d), d)
+        status = budget_status(
+            await estimate_compare(
+                body.task, body.selections, d, attachment_ids=body.attachment_ids
+            ),
+            d,
+        )
         if status.cli_calls and not body.allow_unknown_cost:
             return _consent_error(ConsentRequiredError(status.cli_calls), status)
         if status.refused:
@@ -684,10 +729,15 @@ def create_app(
                 status,
             )
         return await run_compare(
-            body.task, body.selections, d, allow_unknown_cost=body.allow_unknown_cost
+            body.task,
+            body.selections,
+            d,
+            allow_unknown_cost=body.allow_unknown_cost,
+            attachment_ids=body.attachment_ids,
         )
 
     _add_synthesis_routes(app, deps)
+    app.include_router(create_attachments_router(lambda: deps().attachment_store))
     app.include_router(
         create_settings_router(
             base_dir=key_base_dir if key_base_dir is not None else Path.cwd(),
