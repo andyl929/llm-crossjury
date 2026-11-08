@@ -1185,7 +1185,24 @@
 
   // ------------------------------------------------------------------ init
 
+  async function maybeOnboard() {
+    // First run (no key from any source, wizard not dismissed): open the setup wizard.
+    try {
+      const resp = await fetch("/api/onboarding", { headers: { Accept: "application/json" } });
+      if (!resp.ok) return false;
+      const data = await resp.json();
+      if (data && data.show === true) {
+        location.assign("/settings?onboarding=1");
+        return true;
+      }
+    } catch (err) {
+      // Onboarding is optional; the main page works without it.
+    }
+    return false;
+  }
+
   async function init() {
+    if (await maybeOnboard()) return;
     $("task").addEventListener("input", invalidateEstimate);
     $("estimate-btn").addEventListener("click", onEstimate);
     $("run-btn").addEventListener("click", onRun);

@@ -116,7 +116,7 @@ CLI_PRODUCTS: dict[str, CliProduct] = {
         install=(
             "macOS/Linux/WSL: curl -fsSL https://claude.ai/install.sh | bash",
             "Windows PowerShell: irm https://claude.ai/install.ps1 | iex",
-            "npm: npm install -g @anthropic-ai/claude-code",
+            "Windows (winget): winget install Anthropic.ClaudeCode",
         ),
         sign_in="Run claude once in a terminal and sign in with your Claude account.",
     ),

@@ -216,7 +216,9 @@ def test_one_failure_does_not_break_the_others(monkeypatch: pytest.MonkeyPatch) 
     result = asyncio.run(run_compare(TASK, _all(), deps))
     by = {m.provider: m for m in result.members}
     assert by["anthropic"].error == "vendor overloaded"
-    assert by["openai"].error == "OPENAI_API_KEY is not set. Add it to .env."
+    assert by["openai"].error == (
+        "OPENAI_API_KEY is not set. Add it in Settings > API Keys (/settings)."
+    )
     assert by["gemini"].text
     assert by["gemini"].error is None
     assert by["xai"].error == "Unexpected error (RuntimeError)."

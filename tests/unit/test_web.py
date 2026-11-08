@@ -214,7 +214,7 @@ def test_run_missing_key_is_a_member_error() -> None:
     response = _client(make_deps(key_envs=KEY_ENVS)).post("/api/run", json=_body("xai"))
     assert response.status_code == 200
     (member,) = response.json()["members"]
-    assert member["error"] == "XAI_API_KEY is not set. Add it to .env."
+    assert member["error"] == "XAI_API_KEY is not set. Add it in Settings > API Keys (/settings)."
 
 
 def test_run_budget_refusal_is_4xx_and_calls_nothing() -> None:

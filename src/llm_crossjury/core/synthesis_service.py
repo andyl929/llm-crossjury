@@ -697,7 +697,9 @@ def make_call_fn(
         backend = chosen.get(spec.provider, Backend.API)
         key_env = deps.key_envs.get(spec.provider) if backend is Backend.API else None
         if key_env is not None and not key_is_set(key_env):
-            raise ProviderUnavailableError(f"{key_env} is not set. Add it to .env.")
+            raise ProviderUnavailableError(
+                f"{key_env} is not set. Add it in Settings > API Keys (/settings)."
+            )
         member = spec.tag or spec.stage
         resolved = _resolve(
             spec.provider, spec.model_id, spec.stage, member, backend=backend, deps=deps

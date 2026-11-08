@@ -54,7 +54,7 @@ from llm_crossjury.core.cost.ledger import (
     compute_cost,
 )
 from llm_crossjury.core.cost.pricing import PricingError, PricingTable
-from llm_crossjury.core.keys import load_key_files
+from llm_crossjury.core.keys import load_all_keys
 from llm_crossjury.core.orchestrator.stage import StageName
 from llm_crossjury.core.providers.base import (
     Backend,
@@ -369,8 +369,9 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
         XaiApiProvider,
     )
 
-    load_dotenv(base_dir / ".env", override=False)
-    load_key_files(
+    # Keys first (records each key's source: env, .env, key file, settings store),
+    # then the rest of .env (non-key settings); existing variables always win.
+    load_all_keys(
         base_dir,
         {
             "anthropic": AnthropicApiProvider.api_key_env,
@@ -379,6 +380,7 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
             "xai": XaiApiProvider.api_key_env,
         },
     )
+    load_dotenv(base_dir / ".env", override=False)
     registry = ModelRegistry.load(resolve_models_path(base_dir))
     pricing = PricingTable(registry)
     cost_config = CostConfig()
@@ -864,7 +866,9 @@ async def _run_member(
     currency = deps.budget.currency
     key_env = deps.key_envs.get(sel.provider) if sel.backend is Backend.API else None
     if key_env is not None and not key_is_set(key_env):
-        return _error_result(call, currency, f"{key_env} is not set. Add it to .env.")
+        return _error_result(
+            call, currency, f"{key_env} is not set. Add it in Settings > API Keys (/settings)."
+        )
     try:
         done = await execute_budgeted_call(
             run_id=run_id,
