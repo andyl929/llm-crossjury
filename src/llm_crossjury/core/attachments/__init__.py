@@ -24,6 +24,11 @@ from llm_crossjury.core.attachments.render import (
     sort_attachments,
     validate_total,
 )
+from llm_crossjury.core.attachments.tokens import (
+    NATIVE_TOKEN_RULES,
+    NativeTokenRule,
+    estimate_attachment_tokens,
+)
 
 __all__ = [
     "ATTACHMENT_NOTICE",
@@ -32,6 +37,7 @@ __all__ = [
     "MAX_PDF_PAGES",
     "MAX_TEXT_CHARS",
     "MAX_TOTAL_BYTES",
+    "NATIVE_TOKEN_RULES",
     "AttachmentError",
     "AttachmentExtractionError",
     "AttachmentMeta",
@@ -39,9 +45,11 @@ __all__ = [
     "AttachmentTooLargeError",
     "BuiltAttachment",
     "FileType",
+    "NativeTokenRule",
     "UnsupportedAttachmentError",
     "build_attachment",
     "detect_file_type",
+    "estimate_attachment_tokens",
     "fallback_block",
     "sanitize_filename",
     "sort_attachments",
