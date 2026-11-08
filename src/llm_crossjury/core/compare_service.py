@@ -49,6 +49,7 @@ from llm_crossjury.core.cost.ledger import (
     compute_cost,
 )
 from llm_crossjury.core.cost.pricing import PricingError, PricingTable
+from llm_crossjury.core.keys import load_key_files
 from llm_crossjury.core.orchestrator.stage import StageName
 from llm_crossjury.core.providers.base import (
     Backend,
@@ -298,8 +299,8 @@ def key_is_set(env_var: str) -> bool:
 def build_default_deps(base_dir: Path) -> CompareDeps:
     """Wire the real registry, pricing, estimator, ledger and API providers.
 
-    Loads ``base_dir / ".env"`` into the environment (existing variables win) without
-    printing anything.
+    Loads ``base_dir / ".env"`` and then ``.<provider>.key`` files into the environment
+    (existing variables win) without printing anything.
 
     Args:
         base_dir: Directory holding ``.env`` and ``config/``.
@@ -315,6 +316,15 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
     )
 
     load_dotenv(base_dir / ".env", override=False)
+    load_key_files(
+        base_dir,
+        {
+            "anthropic": AnthropicApiProvider.api_key_env,
+            "openai": OpenAIApiProvider.api_key_env,
+            "gemini": GeminiApiProvider.api_key_env,
+            "xai": XaiApiProvider.api_key_env,
+        },
+    )
     registry = ModelRegistry.load(resolve_models_path(base_dir))
     pricing = PricingTable(registry)
     cost_config = CostConfig()

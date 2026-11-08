@@ -37,3 +37,6 @@ frontend/dist/
 
 # Local model registry with real, user-verified entries (see config/models.yaml)
 config/models.local.yaml
+
+# Local API key files (one key per file), e.g. .anthropic.key - never commit
+*.key
