@@ -30,7 +30,7 @@ import os
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from functools import lru_cache
@@ -39,6 +39,18 @@ from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from llm_crossjury.core.attachments.build import BuiltAttachment
+from llm_crossjury.core.attachments.prompt import (
+    AttachmentReceipt,
+    DeliveryMode,
+    attachment_tokens,
+    inline_attachments,
+    receipts,
+    refusal_message,
+    with_attachments,
+)
+from llm_crossjury.core.attachments.render import sort_attachments, validate_total
+from llm_crossjury.core.attachments.store import AttachmentNotFoundError, AttachmentStore
 from llm_crossjury.core.config import BudgetConfig, CostConfig
 from llm_crossjury.core.cost.estimate import (
     CallPlan,
@@ -98,6 +110,14 @@ PROMPT_ID = "compare/answer.v1"
 """Prompt template used for compare answers (``prompts/<id>.md``)."""
 
 _PROMPT_VARIABLE = "{task}"
+
+MAX_ATTACHMENTS = 20
+"""Product setting: most files one run may carry."""
+
+TOKEN_COUNT_TIMEOUT_S = 15.0
+"""Vendor token counting that takes longer falls back to the local estimate."""
+
+_TOKEN_COUNT_CACHE_MAX = 256
 
 
 # --------------------------------------------------------------------------- errors
@@ -170,6 +190,33 @@ class MemberResult(_Frozen):
     """``None`` when unknown (failed call, or usage the vendor did not report)."""
     currency: str
     latency_s: float | None
+    attachments: tuple[AttachmentReceipt, ...] = ()
+    """How this member received each attached file (native, text or refused)."""
+
+
+class AttachmentEstimateLine(_Frozen):
+    """Estimated input tokens of one attachment for one member."""
+
+    provider: str
+    backend: Backend
+    model: str
+    id: str
+    filename: str
+    mode: DeliveryMode
+    tokens: int | None
+    """Local estimate (``estimate_attachment_tokens``); ``None`` when refused."""
+    vendor_counted: bool
+    """The member's input total came from the vendor's token counter (which already
+    includes the attachments); ``tokens`` is then shown for information only."""
+
+
+class CompareEstimateDetails(_Frozen):
+    """A compare estimate plus the per-attachment lines and member refusals."""
+
+    estimate: CostEstimate
+    attachments: tuple[AttachmentEstimateLine, ...]
+    refusals: tuple[str, ...]
+    """Members that will fail because they cannot receive an attachment."""
 
 
 class CompareResult(_Frozen):
@@ -246,6 +293,16 @@ class EstimatorLike(Protocol):
     def estimate(self, plan: list[CallPlan], resolved: list[ResolvedModel]) -> CostEstimate: ...
 
 
+class AttachmentStoreLike(Protocol):
+    """The part of :class:`AttachmentStore` the services and the upload API use."""
+
+    def get(self, attachment_id: str) -> BuiltAttachment: ...
+
+    def put(self, built: BuiltAttachment) -> str: ...
+
+    def delete(self, attachment_id: str) -> bool: ...
+
+
 class LedgerLike(Protocol):
     """The part of :class:`~llm_crossjury.core.cost.ledger.Ledger` compare mode uses."""
 
@@ -300,6 +357,10 @@ class CompareDeps:
         compute_cost: Cost of one completed call from its usage and price.
         count_tokens: Local token heuristic for estimates.
         prompts_dir: Directory holding the prompt templates.
+        attachment_store: Uploaded attachments by id (``None`` = attachments are not
+            available).
+        token_count_cache: Vendor token counts by request identity (bounded),
+            so an estimate followed by a run counts once.
     """
 
     providers: Mapping[tuple[str, Backend], Provider]
@@ -313,6 +374,8 @@ class CompareDeps:
     compute_cost: CostFn = _real_compute_cost
     count_tokens: TokenCounter = estimate_tokens
     prompts_dir: Path = field(default_factory=default_prompts_dir)
+    attachment_store: AttachmentStoreLike | None = None
+    token_count_cache: dict[str, int | None] = field(default_factory=dict)
 
 
 def provider_names(deps: CompareDeps) -> tuple[str, ...]:
@@ -381,6 +444,7 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
         },
     )
     load_dotenv(base_dir / ".env", override=False)
+    data = resolve_data_paths()
     registry = ModelRegistry.load(resolve_models_path(base_dir))
     pricing = PricingTable(registry)
     cost_config = CostConfig()
@@ -408,8 +472,9 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
         resolver=ModelResolver(registry, ResolutionMode.NORMAL),
         pricing=pricing,
         estimator=estimator,
-        ledger=SqliteLedger(resolve_data_paths().ledger),
+        ledger=SqliteLedger(data.ledger),
         budget=BudgetConfig(),
+        attachment_store=AttachmentStore(data.root / "attachments"),
     )
 
 
@@ -534,8 +599,12 @@ def prefix_fingerprint(prompt: Prompt) -> str:
     Computed here because ``Prompt.prefix_fingerprint`` is unimplemented in the
     frozen contract.
     """
+    # Attachments are identified by their sha256; their raw bytes are not serialized.
     payload = json.dumps(
-        [m.model_dump(mode="json") for m in prompt.stable_prefix],
+        [
+            m.model_dump(mode="json", exclude={"attachments": {"__all__": {"data"}}})
+            for m in prompt.stable_prefix
+        ],
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -556,6 +625,14 @@ class PreparedCall:
     """``None`` for the ``cli`` backend (unknown cost)."""
     request: CompletionRequest
     plan: CallPlan
+    attachments: tuple[AttachmentReceipt, ...] = ()
+    """How this member receives each attachment."""
+    attachment_tokens: tuple[tuple[str, int | None], ...] = ()
+    """Local token estimate per attachment id (``None`` = refused)."""
+    refusal: str | None = None
+    """Set when the member cannot receive an attachment: it fails without a call."""
+    vendor_counted: bool = False
+    """``plan`` input tokens came from the vendor's token counter."""
 
 
 def _validate(task: str, selections: Sequence[Selection], deps: CompareDeps) -> None:
@@ -603,10 +680,47 @@ def checked_price(
     return price
 
 
+def load_attachments(
+    attachment_ids: Sequence[str], deps: CompareDeps
+) -> tuple[BuiltAttachment, ...]:
+    """Load uploaded attachments by id, check the run total and sort them (ADR 0007).
+
+    Duplicate ids are loaded once.
+
+    Raises:
+        SelectionError: too many files.
+        AttachmentNotFoundError: an id is unknown or expired, or attachments are not
+            available in this setup.
+        AttachmentTooLargeError: the total exceeds the run limit.
+    """
+    ids = list(dict.fromkeys(attachment_ids))
+    if not ids:
+        return ()
+    if len(ids) > MAX_ATTACHMENTS:
+        raise SelectionError(f"Attach at most {MAX_ATTACHMENTS} files per run.")
+    store = deps.attachment_store
+    if store is None:
+        raise AttachmentNotFoundError("attachments are not available in this setup")
+    built = [store.get(attachment_id) for attachment_id in ids]
+    validate_total(b.attachment for b in built)
+    order = {a.sha256: i for i, a in enumerate(sort_attachments(b.attachment for b in built))}
+    return tuple(sorted(built, key=lambda b: order[b.attachment.sha256]))
+
+
 def prepare_calls(
-    task: str, selections: Sequence[Selection], deps: CompareDeps
+    task: str,
+    selections: Sequence[Selection],
+    deps: CompareDeps,
+    *,
+    attachments: Sequence[BuiltAttachment] = (),
 ) -> list[PreparedCall]:
     """Validate, resolve and price every selection, and build its request and plan.
+
+    With attachments (already loaded, see :func:`load_attachments`), the stable prefix
+    is the system message (plus the attachment notice) and one user message carrying
+    the files; the variable suffix is the task. ``cli`` members get the files' text
+    inlined in that message. A member that cannot receive a file (an image without
+    native support, or any image on ``cli``) gets a ``refusal`` and is not called.
 
     Raises:
         SelectionError: invalid task or selections, or a ``cli`` model without
@@ -617,10 +731,12 @@ def prepare_calls(
     """
     _validate(task, selections, deps)
     template = load_prompt_template(deps.prompts_dir / f"{PROMPT_ID}.md")
-    prompt = template.render(task)
-    fingerprint = prefix_fingerprint(prompt)
-    prefix_tokens = sum(deps.count_tokens(m.content) for m in prompt.stable_prefix)
-    suffix_tokens = sum(deps.count_tokens(m.content) for m in prompt.variable_suffix)
+    base_prompt = template.render(task)
+    built = tuple(attachments)
+    shared_prompt = with_attachments(base_prompt, [b.attachment for b in built])
+    # Text of the prefix without attachment content; attachments are added per member.
+    prefix_tokens = sum(deps.count_tokens(m.content) for m in shared_prompt.stable_prefix)
+    suffix_tokens = sum(deps.count_tokens(m.content) for m in shared_prompt.variable_suffix)
 
     prepared: list[PreparedCall] = []
     for sel in selections:
@@ -641,6 +757,9 @@ def prepare_calls(
                 f"{sel.provider}/{resolved.model_id}: max output tokens "
                 f"{sel.max_output_tokens} exceeds the model limit {limit}."
             )
+        prompt, member_receipts, tokens_by_id, refusal = _member_prompt(
+            base_prompt, shared_prompt, built, sel, resolved, deps
+        )
         request = CompletionRequest(
             model=resolved.model_id,
             prompt=prompt,
@@ -659,8 +778,8 @@ def prepare_calls(
             model=resolved.model_id,
             backend=sel.backend,
             reasoning=resolved.effective_reasoning,
-            prefix_fingerprint=fingerprint,
-            prefix_tokens=prefix_tokens,
+            prefix_fingerprint=prefix_fingerprint(prompt),
+            prefix_tokens=prefix_tokens + sum(t or 0 for t in tokens_by_id.values()),
             suffix_tokens=suffix_tokens,
             expected_output_tokens_low=max(1, sel.max_output_tokens // ESTIMATE_LOW_OUTPUT_DIVISOR),
             expected_output_tokens_high=sel.max_output_tokens,
@@ -668,25 +787,201 @@ def prepare_calls(
         )
         prepared.append(
             PreparedCall(
-                selection=sel, resolved=resolved, pricing=price, request=request, plan=plan
+                selection=sel,
+                resolved=resolved,
+                pricing=price,
+                request=request,
+                plan=plan,
+                attachments=member_receipts,
+                attachment_tokens=tuple(tokens_by_id.items()),
+                refusal=refusal,
             )
         )
     return prepared
+
+
+def _member_prompt(  # noqa: PLR0917 - private helper of prepare_calls
+    base_prompt: Prompt,
+    shared_prompt: Prompt,
+    built: Sequence[BuiltAttachment],
+    sel: Selection,
+    resolved: ResolvedModel,
+    deps: CompareDeps,
+) -> tuple[Prompt, tuple[AttachmentReceipt, ...], dict[str, int | None], str | None]:
+    """The prompt, attachment receipts, token estimates and refusal of one member."""
+    if not built:
+        return shared_prompt, (), {}, None
+    caps = deps.providers[(sel.provider, sel.backend)].capabilities(resolved.model_id)
+    member_receipts = receipts(built, caps.input_modalities, sel.backend)
+    tokens_by_id = attachment_tokens(
+        built,
+        provider=sel.provider,
+        input_modalities=caps.input_modalities,
+        backend=sel.backend,
+    )
+    refused = [r for r in member_receipts if r.mode == "refused"]
+    refusal = (
+        refusal_message(
+            refused, provider=sel.provider, model=resolved.model_id, backend=sel.backend
+        )
+        if refused
+        else None
+    )
+    if sel.backend is not Backend.CLI:
+        return shared_prompt, member_receipts, tokens_by_id, refusal
+    # cli adapters ignore Message.attachments: inline the text (refused files are left
+    # out; a refused member is never called anyway).
+    textual = [b.attachment for b in built if b.attachment.fallback_text is not None]
+    prompt = inline_attachments(with_attachments(base_prompt, textual)) if textual else base_prompt
+    return prompt, member_receipts, tokens_by_id, refusal
+
+
+def _count_key(call: PreparedCall) -> str:
+    suffix = json.dumps([m.content for m in call.request.prompt.variable_suffix])
+    raw = json.dumps(
+        [
+            call.selection.provider,
+            call.selection.backend.value,
+            call.resolved.model_id,
+            call.plan.prefix_fingerprint,
+            suffix,
+        ]
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+async def _vendor_count(call: PreparedCall, deps: CompareDeps) -> int | None:
+    key = _count_key(call)
+    if key in deps.token_count_cache:
+        return deps.token_count_cache[key]
+    provider = deps.providers[(call.selection.provider, call.selection.backend)]
+    try:
+        count = await asyncio.wait_for(
+            provider.count_input_tokens(call.request), timeout=TOKEN_COUNT_TIMEOUT_S
+        )
+    except Exception:  # counting is best effort: fall back to the local estimate
+        return None
+    if len(deps.token_count_cache) >= _TOKEN_COUNT_CACHE_MAX:
+        deps.token_count_cache.clear()
+    deps.token_count_cache[key] = count
+    return count
+
+
+async def apply_vendor_counts(
+    prepared: Sequence[PreparedCall], deps: CompareDeps
+) -> list[PreparedCall]:
+    """Replace local input estimates with vendor token counts where available.
+
+    Only calls that carry attachments are counted (the local heuristic is weakest
+    there, and plain-text estimates stay free of vendor calls). Only ``api`` members
+    with their key set and no refusal are counted; a count that fails, times out or
+    returns ``None`` keeps the local estimate. ``api`` adapters count attachments in
+    the same native or text form they send them.
+    """
+
+    async def one(call: PreparedCall) -> PreparedCall:
+        sel = call.selection
+        if not call.attachments or call.refusal is not None or sel.backend is not Backend.API:
+            return call
+        key_env = deps.key_envs.get(sel.provider)
+        if key_env is not None and not key_is_set(key_env):
+            return call
+        count = await _vendor_count(call, deps)
+        if count is None:
+            return call
+        plan = call.plan.model_copy(
+            update={"prefix_tokens": max(0, count - call.plan.suffix_tokens)}
+        )
+        return replace(call, plan=plan, vendor_counted=True)
+
+    return list(await asyncio.gather(*(one(call) for call in prepared)))
 
 
 def _estimate_prepared(prepared: Sequence[PreparedCall], deps: CompareDeps) -> CostEstimate:
     return deps.estimator.estimate([p.plan for p in prepared], [p.resolved for p in prepared])
 
 
+async def prepare_compare(
+    task: str,
+    selections: Sequence[Selection],
+    deps: CompareDeps,
+    *,
+    attachment_ids: Sequence[str] = (),
+) -> list[PreparedCall]:
+    """Load the attachments, prepare every call and apply vendor token counts.
+
+    Raises:
+        SelectionError, ResolutionError, PricingError: see :func:`prepare_calls`.
+        AttachmentError: see :func:`load_attachments`.
+    """
+    built = load_attachments(attachment_ids, deps)
+    prepared = prepare_calls(task, selections, deps, attachments=built)
+    return await apply_vendor_counts(prepared, deps)
+
+
+def _details(prepared: Sequence[PreparedCall], deps: CompareDeps) -> CompareEstimateDetails:
+    lines: list[AttachmentEstimateLine] = []
+    for call in prepared:
+        tokens = dict(call.attachment_tokens)
+        for receipt in call.attachments:
+            lines.append(
+                AttachmentEstimateLine(
+                    provider=call.selection.provider,
+                    backend=call.selection.backend,
+                    model=call.resolved.model_id,
+                    id=receipt.id,
+                    filename=receipt.filename,
+                    mode=receipt.mode,
+                    tokens=tokens.get(receipt.id),
+                    vendor_counted=call.vendor_counted,
+                )
+            )
+    return CompareEstimateDetails(
+        estimate=_estimate_prepared(prepared, deps),
+        attachments=tuple(lines),
+        refusals=tuple(
+            f"{call.selection.provider}: {call.refusal}"
+            for call in prepared
+            if call.refusal is not None
+        ),
+    )
+
+
+async def estimate_compare_details(
+    task: str,
+    selections: Sequence[Selection],
+    deps: CompareDeps,
+    *,
+    attachment_ids: Sequence[str] = (),
+) -> CompareEstimateDetails:
+    """Estimate a compare run, with per-attachment lines, without any model call.
+
+    Vendor token counting (free, no completion) may be used for calls that carry
+    attachments (see :func:`apply_vendor_counts`).
+
+    Raises:
+        SelectionError, ResolutionError, PricingError: see :func:`prepare_calls`.
+        AttachmentError: see :func:`load_attachments`.
+    """
+    prepared = await prepare_compare(task, selections, deps, attachment_ids=attachment_ids)
+    return _details(prepared, deps)
+
+
 async def estimate_compare(
-    task: str, selections: Sequence[Selection], deps: CompareDeps
+    task: str,
+    selections: Sequence[Selection],
+    deps: CompareDeps,
+    *,
+    attachment_ids: Sequence[str] = (),
 ) -> CostEstimate:
     """Estimate a compare run without making any model call.
 
     Raises:
         SelectionError, ResolutionError, PricingError: see :func:`prepare_calls`.
+        AttachmentError: see :func:`load_attachments`.
     """
-    return _estimate_prepared(prepare_calls(task, selections, deps), deps)
+    details = await estimate_compare_details(task, selections, deps, attachment_ids=attachment_ids)
+    return details.estimate
 
 
 def cli_call_count(estimate: CostEstimate) -> int:
@@ -774,6 +1069,7 @@ def _error_result(call: PreparedCall, currency: str, error: str) -> MemberResult
         cost=None,
         currency=currency,
         latency_s=None,
+        attachments=call.attachments,
     )
 
 
@@ -864,6 +1160,8 @@ async def _run_member(
 ) -> MemberResult:
     sel = call.selection
     currency = deps.budget.currency
+    if call.refusal is not None:
+        return _error_result(call, currency, call.refusal)
     key_env = deps.key_envs.get(sel.provider) if sel.backend is Backend.API else None
     if key_env is not None and not key_is_set(key_env):
         return _error_result(
@@ -898,6 +1196,7 @@ async def _run_member(
         cost=done.cost,
         currency=currency if call.pricing is None else call.pricing.currency,
         latency_s=done.latency_s,
+        attachments=call.attachments,
     )
 
 
@@ -946,6 +1245,7 @@ async def run_compare(
     *,
     run_id: str | None = None,
     allow_unknown_cost: bool = False,
+    attachment_ids: Sequence[str] = (),
 ) -> CompareResult:
     """Check consent, estimate, check the budget, then run every member concurrently.
 
@@ -956,14 +1256,16 @@ async def run_compare(
         run_id: Run id to use (default: a new one).
         allow_unknown_cost: The user consented to ``cli`` calls of unknown cost that
             count against their plan's usage limits. Required for any ``cli`` member.
+        attachment_ids: Uploaded attachments sent to every member (ADR 0007).
 
     Raises:
         SelectionError, ResolutionError, PricingError: see :func:`prepare_calls`.
+        AttachmentError: see :func:`load_attachments`.
         ConsentRequiredError: a ``cli`` member without ``allow_unknown_cost``.
         BudgetRefusedError: the high estimate of the priced part exceeds the run
             limit or today's remaining budget. No call is made.
     """
-    prepared = prepare_calls(task, selections, deps)
+    prepared = await prepare_compare(task, selections, deps, attachment_ids=attachment_ids)
     estimate = _estimate_prepared(prepared, deps)
     require_consent(cli_call_count(estimate), allow_unknown_cost)
     status = budget_status(estimate, deps)

@@ -8,6 +8,8 @@ Layout under ``platformdirs.user_data_dir("llm-crossjury", appauthor=False)``
     runs/<run_id>/content/      prompts and responses (only if store_content: true)
     checkpoints/<run_id>/       paused-run snapshot incl. content (temporary: deleted
                                 on completion or after checkpoint_retention_days)
+    attachments/<sha256>/       uploaded task attachments (temporary, owner-only:
+                                deleted 24 h after upload; see core.attachments.store)
 """
 
 from __future__ import annotations

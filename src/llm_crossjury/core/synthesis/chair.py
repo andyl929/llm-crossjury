@@ -30,9 +30,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
+from llm_crossjury.core.attachments.prompt import with_attachments
+from llm_crossjury.core.attachments.render import fallback_block
 from llm_crossjury.core.cost.estimate import estimate_tokens
 from llm_crossjury.core.prompting import load_template
-from llm_crossjury.core.providers.base import Prompt
+from llm_crossjury.core.providers.base import Attachment, Prompt
 from llm_crossjury.core.schemas._base import Severity
 from llm_crossjury.core.schemas.agreement import ClaimGroup, ClaimRef
 from llm_crossjury.core.schemas.export import strict_json_schema
@@ -259,12 +261,17 @@ def _build_prompt(
     extra_instructions: str | None,
     previous: Synthesis | None,
     rulings: Sequence[Ruling],
+    attachments: Sequence[Attachment] = (),
 ) -> Prompt:
     template = load_template(PROMPT_ID)
-    return template.render(
+    prompt = template.render(
         prefix_values={"material": _render_material(answers, task, agreement, reviews)},
         suffix_values={"request": _render_request(extra_instructions, previous, rulings)},
     )
+    # ADR 0007: the notice joins the system message and the files follow it in one
+    # user message, all inside the stable prefix (sorted, so re-synthesis can hit the
+    # cache).
+    return with_attachments(prompt, attachments)
 
 
 # --------------------------------------------------------------------------- validation
@@ -328,10 +335,24 @@ def estimate_chair(
     with_reviews: bool,
     extra_instructions: str | None,
     resynthesis: bool = False,
+    attachments: Sequence[Attachment] = (),
+    attachment_tokens: int | None = None,
 ) -> list[PlannedCall]:
     """Planned calls for the estimate (exactly one chair call).
 
     Review material that does not exist yet is estimated from the answer lengths.
+
+    Args:
+        answers: The labelled answers.
+        chair: The chair model.
+        task: The user's task.
+        with_reviews: Whether review material will be part of the prompt.
+        extra_instructions: The user's extra instructions.
+        resynthesis: Add the previous synthesis and the rulings to the input.
+        attachments: Files the chair receives (ADR 0007).
+        attachment_tokens: The caller's estimate of the attachments' input tokens
+            (it knows whether they go native or as text). ``None`` counts the text
+            form of every attachment that has one.
     """
     prompt = _build_prompt(
         answers,
@@ -341,10 +362,16 @@ def estimate_chair(
         extra_instructions=extra_instructions,
         previous=None,
         rulings=(),
+        attachments=attachments,
     )
     input_tokens = estimate_tokens(
         "\n".join(m.content for m in (*prompt.stable_prefix, *prompt.variable_suffix))
     )
+    if attachment_tokens is None:
+        attachment_tokens = sum(
+            estimate_tokens(fallback_block(a)) for a in attachments if a.fallback_text is not None
+        )
+    input_tokens += attachment_tokens
     answer_tokens = [estimate_tokens(a.text) for a in answers]
     longest = max(answer_tokens, default=0)
     if with_reviews:
@@ -417,8 +444,13 @@ async def run_chair(
     call: CallFn,
     previous: Synthesis | None = None,
     rulings: Sequence[Ruling] = (),
+    attachments: Sequence[Attachment] = (),
 ) -> ChairOutcome:
     """Run the chair call (via ``structured_call``) and build the additional list.
+
+    ``attachments`` (ADR 0007) are placed in a user message inside the stable prefix,
+    after the system message (which gains the attachment notice), in sha256 order.
+    The ``CallFn`` adapts them to the chair's backend (text only for ``cli``).
 
     Raises:
         StructuredOutputError: if the output stays invalid or ``final_text`` is null.
@@ -435,6 +467,7 @@ async def run_chair(
         extra_instructions=extra_instructions,
         previous=previous,
         rulings=rulings,
+        attachments=attachments,
     )
     spec = CallSpec(
         stage=STAGE,

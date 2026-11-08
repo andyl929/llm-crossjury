@@ -469,3 +469,30 @@ details.cli-help .actions { margin-top: 6px; }
 }
 
 .consent input { margin-top: 3px; }
+
+/* ---- attachments */
+
+.task-panel.drop-target { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.attach-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.attach-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.attach-item {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.attach-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.attach-name { font-weight: 600; word-break: break-all; }
+.attach-remove { margin-left: auto; }
+.attach-warn { color: var(--warn); font-size: 12px; margin-top: 2px; }
+.attach-privacy {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  font-size: 13px;
+}
+.attach-modes { list-style: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.attach-modes li + li { margin-top: 2px; }
+.badge-info { color: var(--accent); background: var(--surface-2); }

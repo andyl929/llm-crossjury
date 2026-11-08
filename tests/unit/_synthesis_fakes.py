@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from llm_crossjury.core.providers.base import Message, Prompt, Role
+from llm_crossjury.core.providers.base import Attachment, Message, Prompt, Role
 from llm_crossjury.core.schemas.agreement import AgreementJudgment, ClaimGroup, ClaimRef
 from llm_crossjury.core.schemas.synthesis import (
     DisputedPoint,
@@ -184,8 +184,13 @@ class FakeStages:
         with_reviews: bool,
         extra_instructions: str | None,
         resynthesis: bool = False,
+        attachments: Sequence[Attachment] = (),
+        attachment_tokens: int | None = None,
     ) -> list[PlannedCall]:
-        self._see("estimate_chair", with_reviews=with_reviews, resynthesis=resynthesis)
+        seen: dict[str, Any] = {"with_reviews": with_reviews, "resynthesis": resynthesis}
+        if attachments:  # recorded only when present, so older assertions stay exact
+            seen.update(attachments=tuple(attachments), attachment_tokens=attachment_tokens)
+        self._see("estimate_chair", **seen)
         return [_planned(chair.STAGE, chair_model)]
 
     async def run_chair(
@@ -200,9 +205,11 @@ class FakeStages:
         call: CallFn,
         previous: Synthesis | None = None,
         rulings: Sequence[Ruling] = (),
+        attachments: Sequence[Attachment] = (),
     ) -> ChairOutcome:
         self._see(
             "run_chair",
+            attachments=tuple(attachments),
             chair=chair_model,
             agreement=agreement,
             reviews=reviews,
