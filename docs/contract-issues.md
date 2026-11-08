@@ -20,7 +20,24 @@ Template:
 
 ## Open issues
 
-_None._
+### CI-4: Temperature support is a model/API-version fact, but the registry has no field for it
+- Date / reporter: 2026-11-08 / providers-a agent (Anthropic + Gemini `api` adapters)
+- File / symbol: `registry/schema.py` `ModelEntry`; `providers/base.py` `Capabilities.temperature`
+- Problem: The compare-MVP convention sets `Capabilities.temperature = True` for every
+  `api` model, but vendors now differ per model and per API version. Anthropic API
+  version `2026-10-21` (used by `anthropic` SDK >= 2.0, installed 2.6.0) returns
+  HTTP 400 for any request that sends `temperature`, `top_p` or `top_k`
+  (https://platform.claude.com/docs/en/api/migration-2026-10-21#sampling-parameters),
+  and the SDK no longer has the parameter. Gemini 4 and Gemini 3.6+ models accept but
+  ignore custom `temperature` (https://aistudio.google.com/docs/text-generation).
+  `ModelEntry` has no field to record either fact, so it can only live in code.
+- Impact: The Anthropic adapter hard-wires `temperature=False` (vendor/API-version fact,
+  not a model fact) and never sends it, so requests don't fail. The Gemini adapter
+  reports `True` and passes it through, even for models that ignore it.
+- Proposed change: Add `ModelEntry.temperature: bool | None` (`None` = unverified, treated
+  as unsupported). Adapters then derive `Capabilities.temperature` from the entry, like
+  `structured_output`.
+- Status: open
 
 ## Approved changes
 
