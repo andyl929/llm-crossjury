@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llm-crossjury Settings</title>
+  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/settings.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">llm-crossjury <span class="brand-mode">Settings</span></div>
+    <nav class="topnav"><a href="/">Back to Compare</a></nav>
+  </header>
+
+  <main class="page">
+    <section id="wizard" class="panel wizard" hidden aria-labelledby="wizard-title">
+      <div class="wizard-head">
+        <h2 id="wizard-title">Welcome to llm-crossjury</h2>
+        <ol id="wizard-progress" class="wizard-progress" aria-label="Setup steps"></ol>
+      </div>
+
+      <div class="wizard-step" data-step="1">
+        <h3>API keys and subscriptions</h3>
+        <p>llm-crossjury sends your question to several AI vendors and compares the answers. To talk to a vendor it needs an <strong>API key</strong> from that vendor's developer console.</p>
+        <ul class="plain-list">
+          <li><strong>API key (available now):</strong> you pay the vendor per use. Every run shows a cost estimate first, and a daily budget stops runaway spending.</li>
+          <li><strong>Subscription (coming soon):</strong> use an existing chat subscription instead of an API key. This mode is not available yet.</li>
+        </ul>
+        <p class="muted">A chat subscription (for example a paid chat app plan) does not include API access; API keys are billed separately by each vendor.</p>
+      </div>
+
+      <div class="wizard-step" data-step="2" hidden>
+        <h3>Get an API key</h3>
+        <p>You need a key from at least one vendor. Open the vendor's official key page, sign in, and create a key. Copy it; most vendors show it only once.</p>
+        <ul id="wizard-links" class="link-list"></ul>
+      </div>
+
+      <div class="wizard-step" data-step="3" hidden>
+        <h3>Paste your key</h3>
+        <form id="wizard-save-form" class="key-form" autocomplete="off">
+          <label class="field">
+            <span class="field-label">Vendor</span>
+            <select id="wizard-provider"></select>
+          </label>
+          <label class="field">
+            <span class="field-label">API key</span>
+            <input id="wizard-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the key here">
+          </label>
+          <div class="actions">
+            <button id="wizard-save" type="submit" class="btn btn-primary">Save key</button>
+            <span id="wizard-save-status" class="muted" aria-live="polite"></span>
+          </div>
+        </form>
+        <p class="muted">The key is stored on this computer only, in your user settings folder. It is never shown again after saving.</p>
+      </div>
+
+      <div class="wizard-step" data-step="4" hidden>
+        <h3>Test the key</h3>
+        <p>The test asks the vendor for its list of models. It spends no tokens and costs nothing.</p>
+        <div class="actions">
+          <button id="wizard-test" type="button" class="btn btn-primary">Test connection</button>
+          <span id="wizard-test-status" class="muted" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <div class="wizard-step" data-step="5" hidden>
+        <h3>Your spending limits</h3>
+        <p>These limits protect you from unexpected costs. Runs that could exceed them are refused before any call is made.</p>
+        <dl id="wizard-budget" class="budget-list"></dl>
+        <p class="muted">These are the current defaults (read-only here).</p>
+      </div>
+
+      <div class="wizard-step" data-step="6" hidden>
+        <h3>All set</h3>
+        <p>You can add keys for more vendors, replace or delete keys at any time under Settings, API Keys.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="/">Start comparing</a>
+        </div>
+      </div>
+
+      <div class="wizard-nav">
+        <button id="wizard-skip" type="button" class="btn btn-link">Skip setup</button>
+        <div class="actions">
+          <button id="wizard-back" type="button" class="btn">Back</button>
+          <button id="wizard-next" type="button" class="btn btn-primary">Next</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="keys-section" class="panel">
+      <div class="keys-head">
+        <h2 class="section-label">API Keys</h2>
+        <a id="open-wizard" class="btn" href="/settings?onboarding=1">Open setup wizard</a>
+      </div>
+      <p class="muted">A key can come from an environment variable, the <code>.env</code> file, a key file <code>.&lt;provider&gt;.key</code>, or be saved here. If several exist, that order decides which one is used.</p>
+      <div id="keys" class="keys">
+        <p class="muted">Loading...</p>
+      </div>
+      <p id="store-note" class="muted"></p>
+    </section>
+
+    <div id="message" class="message" role="alert" hidden></div>
+  </main>
+
+  <script src="/settings.js"></script>
+</body>
+</html>
