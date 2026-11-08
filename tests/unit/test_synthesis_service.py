@@ -12,7 +12,7 @@ from llm_crossjury.core.anonymize import REDACTION
 from llm_crossjury.core.compare_service import BudgetRefusedError, CompareDeps, SelectionError
 from llm_crossjury.core.config import BudgetConfig
 from llm_crossjury.core.cost.pricing import PricingError
-from llm_crossjury.core.providers.base import ProviderError
+from llm_crossjury.core.providers.base import Backend, ProviderError
 from llm_crossjury.core.synthesis.chair import Ruling
 from llm_crossjury.core.synthesis.types import ModelChoice
 from llm_crossjury.core.synthesis_service import (
@@ -348,7 +348,7 @@ def test_budget_refusal_counts_daily_remaining(stages: FakeStages) -> None:
 def test_provider_failure_becomes_a_stage_error(stages: FakeStages) -> None:
     deps = _deps()
     providers = dict(deps.providers)
-    providers["openai"] = raising_provider("openai", ProviderError("vendor down"))
+    providers[("openai", Backend.API)] = raising_provider("openai", ProviderError("vendor down"))
     broken = CompareDeps(**{**deps.__dict__, "providers": providers})
     with pytest.raises(SynthesisStageError) as info:
         asyncio.run(run_agreement_step(_req(), broken))

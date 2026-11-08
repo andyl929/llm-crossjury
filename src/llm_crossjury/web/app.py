@@ -42,6 +42,7 @@ from llm_crossjury.core.compare_service import (
     budget_status,
     estimate_compare,
     key_is_set,
+    provider_names,
     run_compare,
     usable_models,
 )
@@ -419,7 +420,7 @@ def create_app(
     async def providers() -> ProvidersResponse:
         d = deps()
         return ProvidersResponse(
-            providers=tuple(_provider_info(name, d) for name in d.providers),
+            providers=tuple(_provider_info(name, d) for name in provider_names(d)),
             default_max_output_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
             budget=_budget_info(d),
         )
