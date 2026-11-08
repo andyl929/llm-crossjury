@@ -52,9 +52,10 @@ class ScrubResult:
 
 def scrub_enabled_for(task_inputs: list[str], configured: bool) -> bool:
     """Return ``False`` if scrubbing is off in config or any task input mentions a name."""
-    raise NotImplementedError
+    return configured and not any(NAME_PATTERN.search(text) for text in task_inputs)
 
 
 def scrub(text: str) -> ScrubResult:
     """Replace every :data:`NAME_PATTERN` match in ``text`` with :data:`REDACTION`."""
-    raise NotImplementedError
+    new_text, count = NAME_PATTERN.subn(REDACTION, text)
+    return ScrubResult(text=new_text, replacements=count)
