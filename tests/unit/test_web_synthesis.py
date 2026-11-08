@@ -212,3 +212,20 @@ def test_synthesis_posts_keep_the_guards(stages: FakeStages) -> None:
     assert cross.status_code == 403
     foreign = TestClient(create_app(make_deps), base_url="http://evil.example")
     assert foreign.post("/api/synthesis/estimate", json=_body()).status_code == 400
+
+
+def test_page_has_the_synthesis_panel() -> None:
+    client = _client(make_deps())
+    page = client.get("/").text
+    for element_id in (
+        "synthesis-section",
+        "syn-instructions",
+        "syn-chair",
+        "syn-btn",
+        "syn-result",
+    ):
+        assert f'id="{element_id}"' in page
+    script = client.get("/app.js").text
+    for path in ("estimate", "agreement", "finish", "resynthesize-estimate", "resynthesize"):
+        assert f'"/api/synthesis/{path}"' in script
+    assert "innerHTML" not in script

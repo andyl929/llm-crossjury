@@ -44,6 +44,40 @@
       </div>
       <div id="results" class="results"></div>
     </section>
+    <section id="synthesis-section" class="panel synthesis" hidden>
+      <div class="synth-head">
+        <h2>AI synthesis</h2>
+        <p class="muted">Measure agreement, let the models review each other anonymously, and have a chair model write one final answer.</p>
+      </div>
+      <div id="syn-unavailable" class="muted" hidden></div>
+      <div id="syn-form" class="synth-form">
+        <label for="syn-instructions" class="field-label">Extra instructions <span class="muted">(optional)</span></label>
+        <textarea id="syn-instructions" rows="3" spellcheck="true"
+          placeholder="Comparison criteria, or a follow-up question for the reviewers and the chair."></textarea>
+        <div class="synth-row">
+          <label class="field" for="syn-chair">
+            <span class="field-label">Chair model</span>
+            <select id="syn-chair"></select>
+          </label>
+          <fieldset class="field tier">
+            <legend class="field-label">Review tier</legend>
+            <label><input type="radio" name="syn-tier" value="economy" checked> Economy <span class="muted">fast models</span></label>
+            <label><input type="radio" name="syn-tier" value="standard"> Standard <span class="muted">same models as above</span></label>
+          </fieldset>
+        </div>
+        <div class="actions">
+          <button id="syn-btn" type="button" class="btn btn-primary" disabled>AI synthesize</button>
+          <span id="syn-status" class="muted" aria-live="polite"></span>
+        </div>
+        <details id="syn-breakdown" class="breakdown" hidden>
+          <summary>Cost breakdown</summary>
+          <div id="syn-breakdown-body"></div>
+        </details>
+      </div>
+      <div id="syn-message" class="message" role="alert" hidden></div>
+      <div id="syn-decision" class="decision" hidden></div>
+      <div id="syn-result" class="synth-result" hidden></div>
+    </section>
   </main>
 
   <script src="/app.js"></script>
