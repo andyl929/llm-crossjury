@@ -303,9 +303,19 @@ def test_complete_nonzero_exit_uses_envelope(
         asyncio.run(_provider().complete(make_request(model=MODEL)))
 
 
-def test_check_runs_version_only(fake_claude: FakeCli) -> None:
+def test_check_runs_version_and_login_status_only(fake_claude: FakeCli) -> None:
     fake_claude.set(response="2.1.300 (Claude Code)\n")
     status = asyncio.run(_provider().check())
     assert status.available
     assert status.version == "2.1.300 (Claude Code)"
-    assert fake_claude.record()["argv"] == ["--version"]
+    assert status.detail.endswith("; signed in")
+    assert fake_claude.calls() == [["--version"], ["auth", "status"]]
+
+
+def test_check_reports_not_signed_in(fake_claude: FakeCli) -> None:
+    fake_claude.set(response="2.1.300 (Claude Code)\n", stderr="account details")
+    fake_claude.set_exit_for("auth", 1)
+    status = asyncio.run(_provider().check())
+    assert not status.available
+    assert "not signed in" in status.detail
+    assert "account details" not in status.detail  # login status output is discarded

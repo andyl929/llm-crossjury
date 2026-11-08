@@ -714,8 +714,47 @@ class CliProviderBase:
             return self._status(False, f"{detail}: {stderr}" if stderr else detail, None)
         lines = [line for line in stdout.splitlines() if line.strip()]
         version = redact(lines[0], limit=80) if lines else None
-        detail = f"{self.command} CLI found ({version or 'version unknown'}); login not checked"
-        return self._status(True, detail, version)
+        return await self._login_report(executable, version)
+
+    async def _login_report(self, executable: Path, version: str | None) -> ProviderStatus:
+        """Combine the version result with the optional login status check."""
+        found = f"{self.command} CLI found ({version or 'version unknown'})"
+        if self.login_status_args is None:
+            return self._status(True, f"{found}; login not checked", version)
+        signed_in = await self._login_status(executable)
+        if signed_in is None:
+            return self._status(True, f"{found}; login status unknown", version)
+        if not signed_in:
+            hint = f"run '{self.command}' once in a terminal and sign in"
+            return self._status(False, f"{found} but not signed in: {hint}", version)
+        return self._status(True, f"{found}; signed in", version)
+
+    login_status_args: tuple[str, ...] | None = None
+    """A vendor-documented, token-free login status subcommand (e.g. ``("auth",
+    "status")``). Only its exit code is used (0 = signed in); its output is discarded
+    unread, because it can describe the account or a key fragment (ADR 0002)."""
+
+    async def _login_status(self, executable: Path) -> bool | None:
+        """Run :attr:`login_status_args`; ``None`` if it could not be run."""
+        if self.login_status_args is None:
+            return None
+        try:
+            with temp_workspace() as cwd:
+                _stdout, _stderr, code = await run_cli(
+                    CliInvocation(
+                        executable=executable,
+                        args=self.login_status_args,
+                        stdin_text="",
+                        cwd=cwd,
+                        timeout_s=CHECK_TIMEOUT_S,
+                        max_output_bytes=64 * 1024,
+                    ),
+                    extra_env=self.extra_env,
+                    env_overrides=self.child_env_overrides(),
+                )
+        except ProviderError:
+            return None
+        return code == 0
 
     def _status(self, available: bool, detail: str, version: str | None) -> ProviderStatus:
         return ProviderStatus(

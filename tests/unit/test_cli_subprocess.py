@@ -88,7 +88,11 @@ sys.stdout.buffer.write(opt("response.txt").encode("utf-8"))
 sys.stdout.buffer.flush()
 sys.stderr.buffer.write(opt("stderr.txt").encode("utf-8"))
 sys.stderr.buffer.flush()
-sys.exit(int(opt("exit_code.txt", "0") or "0"))
+first = sys.argv[1] if len(sys.argv) > 1 else ""
+with open(here / "calls.jsonl", "a", encoding="utf-8") as log:
+    log.write(json.dumps(sys.argv[1:]) + chr(10))
+code = opt("exit_code_" + first + ".txt", "") or opt("exit_code.txt", "0") or "0"
+sys.exit(int(code))
 """
 
 
@@ -131,6 +135,18 @@ class FakeCli:
         ):
             if value is not None:
                 (self.dir / filename).write_text(value, encoding="utf-8")
+
+    def set_exit_for(self, first_arg: str, code: int) -> None:
+        """Exit with ``code`` when argv[1] is ``first_arg`` (e.g. ``"auth"``)."""
+        (self.dir / f"exit_code_{first_arg}.txt").write_text(str(code), encoding="utf-8")
+
+    def calls(self) -> list[list[str]]:
+        """Every argv the fake was started with, in order."""
+        path = self.dir / "calls.jsonl"
+        if not path.exists():
+            return []
+        lines = path.read_text("utf-8").splitlines()
+        return [json.loads(line) for line in lines if line.strip()]
 
     def record(self) -> dict[str, Any]:
         data: dict[str, Any] = json.loads((self.dir / "record.json").read_text("utf-8"))

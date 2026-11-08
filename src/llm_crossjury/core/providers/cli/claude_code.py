@@ -175,6 +175,9 @@ class ClaudeCliProvider(CliProviderBase):
     extra_env = ("CLAUDE_CONFIG_DIR",)
     """Documented override of Claude Code's config directory; without it a user who
     set it would appear logged out. Passed through unread."""
+    login_status_args = ("auth", "status")
+    """``claude auth status`` exits 0 when signed in and 1 when not; it spends no tokens
+    (https://code.claude.com/docs/en/cli-reference). Only the exit code is used."""
 
     def native_schema_usable(self) -> bool:
         """``--json-schema`` is used only when the executable is not a batch shim."""
