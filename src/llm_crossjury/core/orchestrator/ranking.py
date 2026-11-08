@@ -28,5 +28,28 @@ class BordaResult:
 
 
 def borda_aggregate(reviews: Sequence[PeerReview]) -> list[BordaResult]:
-    """Return one result per ranked label, best first (ties keep label order)."""
-    raise NotImplementedError
+    """Return one result per ranked label, best first (ties keep label order).
+
+    Labels that appear only in rankings with ``m == 1`` get ``score=None`` and sort
+    after every scored label. Callers are expected to pass only reviews whose ranking
+    is a permutation of their targets; a repeated label in one ranking is counted at
+    its first position only.
+    """
+    points: dict[str, list[float]] = {}
+    for review in reviews:
+        ranking = list(dict.fromkeys(review.ranking))
+        m = len(ranking)
+        for position, label in enumerate(ranking):
+            earned = points.setdefault(label, [])
+            if m >= 2:  # noqa: PLR2004
+                earned.append((m - 1 - position) / (m - 1))
+    results = [
+        BordaResult(
+            label=label,
+            score=sum(earned) / len(earned) if earned else None,
+            informative_reviews=len(earned),
+        )
+        for label, earned in points.items()
+    ]
+    results.sort(key=lambda r: (r.score is None, -(r.score or 0.0), r.label))
+    return results
