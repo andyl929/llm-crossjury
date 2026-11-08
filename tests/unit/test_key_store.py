@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import stat
+import sys
+import types
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from llm_crossjury.core import keys
+from llm_crossjury.core import key_check, keys
 from llm_crossjury.core.keys import (
     CONFIG_DIR_ENV,
     PROVIDER_KEY_ENVS,
@@ -238,3 +241,170 @@ def test_nothing_is_printed_or_logged(
     delete_key("anthropic", base_dir=base)
     out = capsys.readouterr()
     assert_no_leak(out.out + out.err + caplog.text)
+
+
+# --------------------------------------------------------------------------- key check
+
+
+class _StatusError(Exception):
+    def __init__(self, status_code: int, text: str) -> None:
+        super().__init__(text)
+        self.status_code = status_code
+
+
+class _GenaiLikeError(Exception):
+    def __init__(self, code: int, details: str) -> None:
+        super().__init__(details)
+        self.code = code
+        self.details = details
+
+
+class APIConnectionError(Exception):
+    """Named like the SDK class (anthropic/openai) the classifier recognises."""
+
+
+def _raising(exc: BaseException) -> key_check.ModelLister:
+    async def lister(api_key: str, timeout_s: float) -> None:
+        raise exc
+
+    return lister
+
+
+def _run(provider: str, lister: key_check.ModelLister) -> key_check.KeyTestResult:
+    return asyncio.run(key_check.check_key(provider, listers={provider: lister}))
+
+
+def test_check_passes_the_current_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, float]] = []
+
+    async def lister(api_key: str, timeout_s: float) -> None:
+        seen.append((api_key, timeout_s))
+
+    monkeypatch.setenv("OPENAI_API_KEY", FAKE_KEY)
+    result = _run("openai", lister)
+    assert result.status == "valid"
+    assert seen == [(FAKE_KEY, key_check.DEFAULT_TIMEOUT_S)]
+    assert_no_leak(result.model_dump_json())
+
+
+def test_check_without_key_makes_no_call() -> None:
+    result = _run("anthropic", _raising(AssertionError("must not be called")))
+    assert result.status == "not_set"
+
+
+@pytest.mark.parametrize(
+    ("exc", "status"),
+    [
+        (_StatusError(401, f"bad key {FAKE_KEY}"), "invalid"),
+        (_StatusError(403, f"forbidden {FAKE_KEY}"), "invalid"),
+        (_GenaiLikeError(400, f"API_KEY_INVALID {FAKE_KEY}"), "invalid"),
+        (_GenaiLikeError(400, "some other bad request"), "error"),
+        (_StatusError(429, "slow down"), "error"),
+        (_StatusError(500, f"boom {FAKE_KEY}"), "error"),
+        (APIConnectionError(f"cannot connect {FAKE_KEY}"), "network_error"),
+        (TimeoutError(), "network_error"),
+        (OSError(f"socket {FAKE_KEY}"), "network_error"),
+        (RuntimeError(f"weird {FAKE_KEY}"), "error"),
+    ],
+)
+def test_errors_are_mapped_and_sanitized(
+    monkeypatch: pytest.MonkeyPatch, exc: BaseException, status: str
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", FAKE_KEY)
+    result = _run("gemini", _raising(exc))
+    assert result.status == status
+    assert_no_leak(result.model_dump_json())
+
+
+def test_slow_vendor_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def slow(api_key: str, timeout_s: float) -> None:
+        await asyncio.sleep(10)
+
+    monkeypatch.setenv("XAI_API_KEY", FAKE_KEY)
+    result = asyncio.run(key_check.check_key("xai", listers={"xai": slow}, timeout_s=-1.9))
+    assert result.status == "network_error"
+
+
+def test_check_rejects_unknown_provider() -> None:
+    with pytest.raises(ValueError, match="Unknown provider"):
+        asyncio.run(key_check.check_key("mistral"))
+
+
+def test_default_listers_use_the_sdk_model_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real listers build SDK clients with the key, a timeout and no retries."""
+    import anthropic  # noqa: PLC0415
+    import openai  # noqa: PLC0415
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeModels:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def list(self, **kwargs: object) -> None:
+            calls.append((f"{self.name}.models.list", kwargs))
+
+    class FakeClient:
+        def __init__(self, name: str, **kwargs: object) -> None:
+            calls.append((f"{name}.init", kwargs))
+            self.models = FakeModels(name)
+            self.name = name
+
+        async def close(self) -> None:
+            calls.append((f"{self.name}.close", {}))
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", lambda **kw: FakeClient("anthropic", **kw))
+    monkeypatch.setattr(openai, "AsyncOpenAI", lambda **kw: FakeClient("openai", **kw))
+
+    async def both() -> None:
+        await key_check.DEFAULT_LISTERS["anthropic"](FAKE_KEY, 5.0)
+        await key_check.DEFAULT_LISTERS["xai"](FAKE_KEY, 5.0)
+
+    asyncio.run(both())
+    assert calls[0] == ("anthropic.init", {"api_key": FAKE_KEY, "timeout": 5.0, "max_retries": 0})
+    assert calls[1] == ("anthropic.models.list", {"limit": 1})
+    assert calls[2][0] == "anthropic.close"
+    assert calls[3] == (
+        "openai.init",
+        {"api_key": FAKE_KEY, "base_url": "https://api.x.ai/v1", "timeout": 5.0, "max_retries": 0},
+    )
+    assert calls[4] == ("openai.models.list", {})
+    assert calls[5][0] == "openai.close"
+
+
+def test_gemini_lister_uses_genai_models_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Faked without importing google.genai (its first import warns)."""
+    import google  # noqa: PLC0415 - namespace package, safe to import
+
+    calls: list[tuple[str, object]] = []
+
+    class FakeAioModels:
+        async def list(self, **kwargs: object) -> None:
+            calls.append(("aio.models.list", kwargs))
+
+    class FakeAio:
+        models = FakeAioModels()
+
+        async def aclose(self) -> None:
+            calls.append(("aio.aclose", None))
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            calls.append(("init", kwargs))
+            self.aio = FakeAio()
+
+    fake_types = types.SimpleNamespace(HttpOptions=lambda **kw: ("HttpOptions", kw))
+    fake_genai = types.SimpleNamespace(Client=FakeClient, types=fake_types)
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+    monkeypatch.setitem(sys.modules, "google.genai.types", fake_types)
+    monkeypatch.setattr(google, "genai", fake_genai, raising=False)
+
+    async def run() -> None:
+        await key_check.DEFAULT_LISTERS["gemini"](FAKE_KEY, 2.5)
+
+    asyncio.run(run())
+    assert calls == [
+        ("init", {"api_key": FAKE_KEY, "http_options": ("HttpOptions", {"timeout": 2500})}),
+        ("aio.models.list", {"config": {"page_size": 1}}),
+        ("aio.aclose", None),
+    ]
