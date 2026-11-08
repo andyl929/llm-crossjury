@@ -53,6 +53,7 @@ from llm_crossjury.core.orchestrator.stage import StageName
 from llm_crossjury.core.providers.base import (
     Backend,
     CompletionRequest,
+    CompletionResult,
     Message,
     Prompt,
     Provider,
@@ -623,6 +624,78 @@ def _error_result(call: PreparedCall, currency: str, error: str) -> MemberResult
     )
 
 
+@dataclass(frozen=True)
+class BudgetedCallResult:
+    """A completed call that was budget-checked and recorded in the ledger."""
+
+    result: CompletionResult
+    cost: Decimal | None
+    latency_s: float
+
+
+async def execute_budgeted_call(
+    *,
+    run_id: str,
+    stage: str,
+    provider: str,
+    resolved: ResolvedModel,
+    pricing: Pricing,
+    request: CompletionRequest,
+    call_high: Decimal,
+    deps: CompareDeps,
+) -> BudgetedCallResult:
+    """Check the budget, reserve, call, record, release (SPEC section 5).
+
+    The ledger check and the reservation happen without an ``await`` in between, so
+    concurrent calls cannot both pass the check against the same headroom. The
+    reservation is released only after the call is recorded, so spent + reserved
+    never dips.
+
+    Args:
+        run_id: Run the call belongs to (per-run limit and ledger grouping).
+        stage: Stage name recorded in the ledger.
+        provider: Provider id (key into ``deps.providers``).
+        resolved: The resolved model.
+        pricing: Its verified price.
+        request: The request to send; ``run_id`` is added to its tags.
+        call_high: High cost estimate of this call, checked and reserved.
+        deps: Compare dependencies.
+
+    Raises:
+        BudgetExceededError: the call could exceed a limit; it is not started.
+        ProviderError: the vendor call failed (nothing is recorded).
+        Exception: anything else the adapter raises, unchanged.
+    """
+    ledger = deps.ledger
+    ledger.check(run_id, call_high, _budget(deps))
+    reservation = ledger.reserve(run_id, call_high)
+    try:
+        tagged = request.model_copy(update={"tags": {**request.tags, "run_id": run_id}})
+        started = time.perf_counter()
+        result = await deps.providers[provider].complete(tagged)
+        latency = time.perf_counter() - started
+        cost = deps.compute_cost(result.usage, pricing)
+        ledger.record(
+            LedgerEntry(
+                run_id=run_id,
+                stage=stage,
+                provider=provider,
+                model=resolved.model_id,
+                backend=result.backend,
+                reasoning=resolved.effective_reasoning,
+                usage=result.usage,
+                cost=cost,
+                currency=pricing.currency,
+                batched=False,
+                duration_s=latency,
+                recorded_at=datetime.now(UTC),
+            )
+        )
+        return BudgetedCallResult(result=result, cost=cost, latency_s=latency)
+    finally:
+        ledger.release(reservation)
+
+
 async def _run_member(
     run_id: str, call: PreparedCall, call_high: Decimal, deps: CompareDeps
 ) -> MemberResult:
@@ -631,57 +704,35 @@ async def _run_member(
     key_env = deps.key_envs.get(sel.provider)
     if key_env is not None and not key_is_set(key_env):
         return _error_result(call, currency, f"{key_env} is not set. Add it to .env.")
-
-    ledger = deps.ledger
-    # check + reserve run without an await in between, so concurrent members cannot
-    # both pass the check against the same headroom.
     try:
-        ledger.check(run_id, call_high, _budget(deps))
+        done = await execute_budgeted_call(
+            run_id=run_id,
+            stage=StageName.ANSWER.value,
+            provider=sel.provider,
+            resolved=call.resolved,
+            pricing=call.pricing,
+            request=call.request,
+            call_high=call_high,
+            deps=deps,
+        )
     except BudgetExceededError as exc:
         return _error_result(call, currency, f"Not started: {exc.scope} budget would be exceeded.")
-    reservation = ledger.reserve(run_id, call_high)
-    try:
-        request = call.request.model_copy(update={"tags": {**call.request.tags, "run_id": run_id}})
-        started = time.perf_counter()
-        try:
-            result = await deps.providers[sel.provider].complete(request)
-        except ProviderError as exc:
-            return _error_result(call, currency, str(exc) or type(exc).__name__)
-        except Exception as exc:  # an adapter bug must not fail the other members
-            # Only the type name: an unwrapped SDK message is not guaranteed secret-free.
-            return _error_result(call, currency, f"Unexpected error ({type(exc).__name__}).")
-        latency = time.perf_counter() - started
-        cost = deps.compute_cost(result.usage, call.pricing)
-        ledger.record(
-            LedgerEntry(
-                run_id=run_id,
-                stage=StageName.ANSWER.value,
-                provider=sel.provider,
-                model=call.resolved.model_id,
-                backend=result.backend,
-                reasoning=call.resolved.effective_reasoning,
-                usage=result.usage,
-                cost=cost,
-                currency=call.pricing.currency,
-                batched=False,
-                duration_s=latency,
-                recorded_at=datetime.now(UTC),
-            )
-        )
-        return MemberResult(
-            provider=sel.provider,
-            model=call.resolved.model_id,
-            requested_model=sel.model,
-            text=result.text,
-            error=None,
-            usage=result.usage,
-            cost=cost,
-            currency=call.pricing.currency,
-            latency_s=latency,
-        )
-    finally:
-        # Released only after the call is recorded, so spent + reserved never dips.
-        ledger.release(reservation)
+    except ProviderError as exc:
+        return _error_result(call, currency, str(exc) or type(exc).__name__)
+    except Exception as exc:  # an adapter bug must not fail the other members
+        # Only the type name: an unwrapped SDK message is not guaranteed secret-free.
+        return _error_result(call, currency, f"Unexpected error ({type(exc).__name__}).")
+    return MemberResult(
+        provider=sel.provider,
+        model=call.resolved.model_id,
+        requested_model=sel.model,
+        text=done.result.text,
+        error=None,
+        usage=done.result.usage,
+        cost=done.cost,
+        currency=call.pricing.currency,
+        latency_s=done.latency_s,
+    )
 
 
 async def execute_calls(

@@ -7,6 +7,10 @@ Serves one static page (vanilla HTML/CSS/JS, no build step) and a small JSON API
 * ``POST /api/estimate``: the cost range and the budget verdict (confirmation needed,
   or refused) for the selections.
 * ``POST /api/run``: runs the comparison and returns every member's result.
+* ``POST /api/synthesis/{estimate,agreement,finish,resynthesize-estimate,resynthesize}``:
+  the stateless AI synthesis upgrade of a finished comparison (see
+  :mod:`llm_crossjury.core.synthesis_service`). The client posts the step-1 material
+  and earlier stage outputs back on every call.
 
 The app is meant to listen on localhost. As defense in depth against other web pages
 in the user's browser, it checks the ``Host`` header (DNS rebinding), requires JSON
@@ -41,8 +45,24 @@ from llm_crossjury.core.compare_service import (
     run_compare,
     usable_models,
 )
+from llm_crossjury.core.cost.estimate import CostEstimate
 from llm_crossjury.core.cost.pricing import PricingError
 from llm_crossjury.core.registry.resolver import ResolutionError
+from llm_crossjury.core.synthesis_service import (
+    AgreementStepResult,
+    FinishRequest,
+    FinishStepResult,
+    ResynthesisRequest,
+    ResynthesisResult,
+    SynthesisEstimate,
+    SynthesisRequest,
+    SynthesisStageError,
+    estimate_resynthesis,
+    estimate_synthesis,
+    run_agreement_step,
+    run_finish_step,
+    run_resynthesis,
+)
 
 LOOPBACK_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
 """Default ``Host`` header values the app accepts."""
@@ -55,6 +75,8 @@ PROVIDER_LABELS: dict[str, str] = {
 }
 
 MAX_TASK_CHARS = 200_000
+MAX_ANSWER_CHARS = 400_000
+MAX_INSTRUCTION_CHARS = 20_000
 
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
@@ -152,6 +174,23 @@ class EstimateResponse(_Frozen):
     budget: BudgetStatus
 
 
+class SynthesisStartRequest(SynthesisRequest):
+    """Agreement step input; ``confirmed`` as for :class:`RunRequest`."""
+
+    confirmed: bool = False
+
+
+class ResynthesizeRequest(ResynthesisRequest):
+    """Re-synthesis input; ``confirmed`` as for :class:`RunRequest`."""
+
+    confirmed: bool = False
+
+
+class ResynthesisEstimateResponse(_Frozen):
+    estimate: CostEstimate
+    budget: BudgetStatus
+
+
 class ErrorResponse(_Frozen):
     code: str
     detail: str
@@ -216,7 +255,73 @@ def _budget_info(deps: CompareDeps) -> BudgetInfo:
     )
 
 
+def _check_synthesis_size(req: SynthesisRequest) -> None:
+    if len(req.task) > MAX_TASK_CHARS:
+        raise SelectionError(f"The task is longer than {MAX_TASK_CHARS} characters.")
+    if len(req.extra_instructions or "") > MAX_INSTRUCTION_CHARS:
+        raise SelectionError(
+            f"The extra instructions are longer than {MAX_INSTRUCTION_CHARS} characters."
+        )
+    if any(len(a.text) > MAX_ANSWER_CHARS for a in req.answers):
+        raise SelectionError(f"An answer is longer than {MAX_ANSWER_CHARS} characters.")
+
+
+def _confirmation_error(status: BudgetStatus) -> JSONResponse:
+    return _error(
+        409,
+        "confirmation_required",
+        f"The high estimate ({status.currency} {status.estimate_high}) exceeds the "
+        f"confirmation threshold ({status.currency} {status.confirm_above}).",
+        status,
+    )
+
+
 # --------------------------------------------------------------------------- app
+
+
+def _add_synthesis_routes(app: FastAPI, deps: Callable[[], CompareDeps]) -> None:
+    """Register the ``/api/synthesis/*`` endpoints (stateless step 2)."""
+
+    @app.post("/api/synthesis/estimate")
+    async def synthesis_estimate(body: SynthesisRequest) -> SynthesisEstimate:
+        _check_synthesis_size(body)
+        return estimate_synthesis(body, deps())
+
+    @app.post("/api/synthesis/agreement", response_model=None)
+    async def synthesis_agreement(
+        body: SynthesisStartRequest,
+    ) -> AgreementStepResult | JSONResponse:
+        _check_synthesis_size(body)
+        d = deps()
+        status = estimate_synthesis(body, d).budget
+        if status.needs_confirmation and not body.confirmed:
+            return _confirmation_error(status)
+        return await run_agreement_step(body, d)
+
+    @app.post("/api/synthesis/finish")
+    async def synthesis_finish(body: FinishRequest) -> FinishStepResult:
+        _check_synthesis_size(body)
+        return await run_finish_step(body, deps())
+
+    @app.post("/api/synthesis/resynthesize-estimate")
+    async def synthesis_resynthesize_estimate(
+        body: ResynthesisRequest,
+    ) -> ResynthesisEstimateResponse:
+        _check_synthesis_size(body)
+        d = deps()
+        est = estimate_resynthesis(body, d)
+        return ResynthesisEstimateResponse(estimate=est, budget=budget_status(est, d))
+
+    @app.post("/api/synthesis/resynthesize", response_model=None)
+    async def synthesis_resynthesize(
+        body: ResynthesizeRequest,
+    ) -> ResynthesisResult | JSONResponse:
+        _check_synthesis_size(body)
+        d = deps()
+        status = budget_status(estimate_resynthesis(body, d), d)
+        if status.needs_confirmation and not body.confirmed:
+            return _confirmation_error(status)
+        return await run_resynthesis(body, d)
 
 
 def create_app(
@@ -289,6 +394,11 @@ def create_app(
     async def _budget_error(request: Request, exc: BudgetRefusedError) -> JSONResponse:
         return _error(409, "budget_refused", str(exc), exc.status)
 
+    @app.exception_handler(SynthesisStageError)
+    async def _stage_error(request: Request, exc: SynthesisStageError) -> JSONResponse:
+        status = 409 if exc.code == "budget_stopped" else 502
+        return _error(status, exc.code, str(exc))
+
     def page(path: str) -> Response:
         name = _STATIC_FILES[path]
         return Response(content=pages[path], media_type=_MEDIA_TYPES[name])
@@ -352,6 +462,8 @@ def create_app(
                 status,
             )
         return await run_compare(body.task, body.selections, d)
+
+    _add_synthesis_routes(app, deps)
 
     return app
 
