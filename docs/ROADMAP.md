@@ -157,6 +157,31 @@ ship a visible fix within the first week.
 Metrics to watch: stars, release downloads, PyPI installs, issues opened/closed,
 first-run success (from user reports; no telemetry, per the SPEC non-goals).
 
+## Model lifecycle (future work)
+
+Vendors release, rename, reprice and retire models every few weeks. The registry
+(ADR 0006) must keep up without users hand-editing YAML. Planned, in order:
+
+1. **Ship a verified registry.** Real entries (with `source_url` and `last_verified`)
+   ship in the package so the app works out of the box; `config/models.local.yaml`
+   stays a user override (**D-7**).
+2. **`llm-crossjury models refresh`** (already designed, still a stub): diff the
+   registry against each vendor's model-list endpoint (api) and CLI listing
+   (`grok models`, the Codex models page, Claude Code aliases); `--draft` writes
+   unverified entries for a human to complete.
+3. **Staleness and retirement in the UI:** warn when a price is older than N days
+   (`PricingTable.stale_entries`), hide models the vendor no longer lists, and turn a
+   vendor "model not found" error into "this model was retired; pick another".
+4. **Registry updates without an app update:** the app can fetch the latest registry
+   published with each GitHub release (hash-checked, opt-in, never executes code), so
+   a new model or price reaches users the day it is verified.
+5. **Maintenance automation:** a scheduled GitHub Action runs the refresh diff and
+   opens a PR with drafts; a PR template asks for the official source links; CI
+   validates the schema and that every verified entry has its sources.
+6. **Subscription aliases:** consider letting cli members pick the CLI's own moving
+   aliases (e.g. Claude Code's `sonnet` / `opus`), which follow the vendor's latest
+   model automatically; cost is plan usage, so no price is needed.
+
 ## Risks
 
 | Risk | Mitigation |
@@ -176,3 +201,6 @@ first-run success (from user reports; no telemetry, per the SPEC non-goals).
 - **D-4** UI languages at launch: English + Simplified Chinese (recommended).
 - **D-5** Custom domain for the site (optional).
 - **D-6** Launch timing: after M1 + M2 + M4 (recommended), with M3/M5 as the v1.0 push.
+- **D-7** Ship real, verified model entries in the package (reverses the phase-0
+  "examples only" rule and its test; recommended, otherwise a fresh install has no
+  usable model).
