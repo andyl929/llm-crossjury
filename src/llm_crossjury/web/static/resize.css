@@ -1,0 +1,136 @@
+/* llm-crossjury home page: drag-to-resize panes (resize.js).
+   Sizes live in custom properties on <html> (--rz-dock-h, --rz-sidebar-w) and are only
+   applied on wide screens; below 900px the sidebar is a drawer and the dock keeps its
+   own height. The dock collapse toggle works at every width. */
+
+/* ------------------------------------------------------------------ handles */
+
+.rz-handle {
+  position: absolute;
+  z-index: 40;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  background: transparent;
+}
+.rz-handle::before,
+.rz-handle::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast), background-color var(--dur-fast);
+}
+/* The line: lights up along the edge being dragged. */
+.rz-handle::before { background: var(--cobalt); }
+/* The grip: a short bar in the middle of the edge. */
+.rz-handle::after {
+  background: var(--rule-strong);
+  border-radius: 2px;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.rz-handle:hover::before,
+.rz-handle:hover::after,
+.rz-handle.is-dragging::before,
+.rz-handle.is-dragging::after,
+.rz-handle:focus-visible::before,
+.rz-handle:focus-visible::after { opacity: 1; }
+.rz-handle:hover::before { opacity: 0.45; }
+.rz-handle.is-dragging::after,
+.rz-handle:focus-visible::after { background: var(--cobalt); }
+.rz-handle:focus { outline: none; }
+.rz-handle:focus-visible::before { opacity: 1; }
+
+/* Composer dock: the top edge, dragged up and down. */
+.rz-dock-handle {
+  left: 0; right: 0;
+  top: -5px;
+  height: 10px;
+  cursor: ns-resize;
+}
+.rz-dock-handle::before { left: 0; right: 0; top: 4px; height: 2px; }
+.rz-dock-handle::after { left: 50%; top: 3px; width: 40px; height: 4px; margin-left: -20px; }
+
+/* Sidebar: the right edge, dragged left and right. */
+.rz-side-handle {
+  top: 0; bottom: 0;
+  right: -5px;
+  width: 10px;
+  cursor: ew-resize;
+}
+.rz-side-handle::before { top: 0; bottom: 0; left: 4px; width: 2px; }
+.rz-side-handle::after { top: 50%; left: 3px; width: 4px; height: 40px; margin-top: -20px; }
+
+.dock { position: relative; }
+
+/* While dragging: the resize cursor everywhere, no text selection, no transitions. */
+html.rz-dragging, html.rz-dragging * { -webkit-user-select: none !important; user-select: none !important; }
+html.rz-dragging-ns, html.rz-dragging-ns * { cursor: ns-resize !important; }
+html.rz-dragging-ew, html.rz-dragging-ew * { cursor: ew-resize !important; }
+
+/* Below 900px the sidebar is a drawer and the dock follows its content: no handles. */
+@media (max-width: 899px) {
+  .rz-handle { display: none; }
+}
+
+/* ------------------------------------------------------------------ sizes (wide screens) */
+
+@media (min-width: 900px) {
+  html[data-rz-sidebar] .sidebar { width: var(--rz-sidebar-w, 272px); }
+
+  /* A dragged dock: at least the chosen height; the message box takes the extra room
+     (overriding the auto-grow height the composer sets inline) and scrolls inside. */
+  html[data-rz-dock]:not([data-rz-collapsed]) .dock {
+    min-height: var(--rz-dock-h, 0px);
+    display: flex;
+    flex-direction: column;
+  }
+  html[data-rz-dock]:not([data-rz-collapsed]) .dock-inner { flex: 1 1 auto; width: 100%; min-height: 0; }
+  html[data-rz-dock]:not([data-rz-collapsed]) .composer { flex: 1 1 auto; min-height: 0; }
+  html[data-rz-dock]:not([data-rz-collapsed]) .composer textarea {
+    flex: 1 1 0;
+    height: auto !important;
+    overflow-y: auto !important;
+  }
+}
+
+/* ------------------------------------------------------------------ collapse toggle */
+
+.rz-collapse .icon { transition: transform var(--dur) var(--ease-out); }
+html[data-rz-collapsed] .rz-collapse .icon { transform: rotate(180deg); }
+
+/* Collapsed: one line for the message, the buttons beside it, no readouts. */
+html[data-rz-collapsed] .dock { padding-top: 6px; padding-bottom: 6px; }
+html[data-rz-collapsed] .dock .rz-dock-handle { display: none; }
+html[data-rz-collapsed] .composer {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 4px 6px;
+}
+html[data-rz-collapsed] .composer > * { flex: 1 1 100%; }
+html[data-rz-collapsed] .composer > .visually-hidden { flex: none; }
+html[data-rz-collapsed] .composer textarea {
+  flex: 1 1 240px;
+  height: 36px !important;
+  min-height: 36px !important;
+  overflow-y: auto !important;
+  padding: 6px 8px;
+}
+html[data-rz-collapsed] .composer-bar { flex: 0 1 auto; flex-wrap: nowrap; }
+html[data-rz-collapsed] .composer-bar .composer-spacer { display: none; }
+html[data-rz-collapsed] .composer-status { display: none; }
+
+@media (max-width: 719px) {
+  html[data-rz-collapsed] .composer-bar { flex: 1 1 100%; flex-wrap: wrap; }
+  html[data-rz-collapsed] .composer-bar .composer-spacer { display: block; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rz-handle::before, .rz-handle::after, .rz-collapse .icon { transition: none; }
+}
+
+@media print {
+  .rz-handle, .rz-collapse { display: none !important; }
+}
