@@ -11,7 +11,10 @@ from typing import Any, TypeVar
 import pytest
 
 from llm_crossjury.core.providers.base import (
+    Attachment,
+    AttachmentKind,
     Backend,
+    CapabilityNotSupportedError,
     CompletionRequest,
     Message,
     Prompt,
@@ -68,6 +71,7 @@ def make_entry(
     cli_flags: CliFlags | None = None,
     structured_output: bool | None = True,
     control: ReasoningControlType = ReasoningControlType.LEVELS,
+    input_modalities: tuple[AttachmentKind, ...] | None = None,
 ) -> ModelEntry:
     mappable = control in (ReasoningControlType.LEVELS, ReasoningControlType.BUDGET)
     return ModelEntry(
@@ -91,6 +95,7 @@ def make_entry(
         source_url=None,
         last_verified=None,
         notes=None,
+        input_modalities=input_modalities,
     )
 
 
@@ -170,6 +175,15 @@ def test_capabilities_unregistered_or_unverified() -> None:
     unknown = provider.capabilities("other")
     assert not any(unknown.model_dump().values())
     assert not any(CodexCliProvider().capabilities(MODEL).model_dump().values())
+
+
+def test_capabilities_images_for_registered_models() -> None:
+    assert make_provider().capabilities(MODEL).input_modalities == {AttachmentKind.IMAGE}
+    verified = make_entry(input_modalities=(AttachmentKind.IMAGE, AttachmentKind.PDF))
+    assert make_provider(verified).capabilities(MODEL).input_modalities == {AttachmentKind.IMAGE}
+    text_only = make_entry(input_modalities=())
+    assert make_provider(text_only).capabilities(MODEL).input_modalities == frozenset()
+    assert make_provider().capabilities("other").input_modalities == frozenset()
 
 
 def test_capabilities_reasoning_needs_cli_template() -> None:
@@ -310,6 +324,91 @@ def test_build_invocation_rejects_invalid_prompt(tmp_path: Path) -> None:
     prompt = Prompt(stable_prefix=(), variable_suffix=())
     with pytest.raises(ProviderError):
         make_provider().build_invocation(make_request(prompt=prompt), tmp_path)
+
+
+def attachment(
+    filename: str, media_type: str, data: bytes, *, fallback: str | None = None
+) -> Attachment:
+    kind = (
+        AttachmentKind.IMAGE
+        if media_type.startswith("image/")
+        else AttachmentKind.PDF
+        if media_type == "application/pdf"
+        else AttachmentKind.DOCUMENT
+    )
+    return Attachment(
+        kind=kind,
+        media_type=media_type,
+        filename=filename,
+        sha256="ab" * 32,
+        data=data,
+        fallback_text=fallback,
+    )
+
+
+PNG = b"\x89PNG\r\n\x1a\nfake-png"
+JPEG = b"\xff\xd8\xfffake-jpeg"
+
+
+def image_request(*attachments: Attachment) -> CompletionRequest:
+    prompt = Prompt(
+        stable_prefix=(
+            Message(role=Role.SYSTEM, content="You are a careful reviewer."),
+            Message(role=Role.USER, content="Files attached by the user:", attachments=attachments),
+        ),
+        variable_suffix=(Message(role=Role.USER, content="What colour is it?"),),
+    )
+    return make_request(prompt=prompt)
+
+
+def test_build_invocation_images_as_relative_files(tmp_path: Path) -> None:
+    request = image_request(
+        attachment("My Screenshot (1) & co.png", "image/png", PNG),
+        attachment("C:\\evil\\photo.jpeg", "image/jpeg", JPEG),
+    )
+    inv = make_provider().build_invocation(request, tmp_path)
+    args = list(inv.args)
+    assert tuple(args[: len(BASE_ARGS)]) == BASE_ARGS
+    images = [args[i + 1] for i, a in enumerate(args) if a == "--image"]
+    assert images == ["img-1.png", "img-2.jpg"]
+    assert (tmp_path / "img-1.png").read_bytes() == PNG
+    assert (tmp_path / "img-2.jpg").read_bytes() == JPEG
+    # --image is greedy: the token after each value is another flag, never the "-" prompt.
+    for i, a in enumerate(args):
+        if a == "--image":
+            assert args[i + 2].startswith("-")
+            assert args[i + 2] != "-"
+    assert args[-1] == "-"
+    joined = " ".join(args)
+    assert "Screenshot" not in joined
+    assert "photo" not in joined
+    assert str(tmp_path) not in joined
+    assert inv.stdin_text == "Files attached by the user:\n\nWhat colour is it?"
+
+
+def test_build_invocation_non_images_are_inlined_as_text(tmp_path: Path) -> None:
+    request = image_request(
+        attachment("report.pdf", "application/pdf", b"%PDF", fallback="pdf text"),
+        attachment("notes.docx", "application/octet-stream", b"PK", fallback="docx text"),
+    )
+    inv = make_provider().build_invocation(request, tmp_path)
+    assert "--image" not in inv.args
+    assert "pdf text" in inv.stdin_text
+    assert "docx text" in inv.stdin_text
+    assert '<attachment name="report.pdf"' in inv.stdin_text
+    assert sorted(p.name for p in tmp_path.iterdir()) == [INSTRUCTIONS_FILE]
+
+
+@pytest.mark.parametrize(
+    ("entry", "media_type"),
+    [(make_entry(), "image/bmp"), (make_entry(input_modalities=()), "image/png")],
+)
+def test_build_invocation_unsendable_image_raises(
+    entry: ModelEntry, media_type: str, tmp_path: Path
+) -> None:
+    request = image_request(attachment("pic", media_type, PNG))
+    with pytest.raises(CapabilityNotSupportedError, match="'pic'"):
+        make_provider(entry).build_invocation(request, tmp_path)
 
 
 # ---------------------------------------------------------------- parse_output

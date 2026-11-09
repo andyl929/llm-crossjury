@@ -34,6 +34,21 @@ Verified 2026-11-08 against the official docs and the openai/codex source at tag
   ``item.started|updated|completed {item: {id, type, ...}}`` and ``error {message}``.
   The final answer is the last completed ``agent_message`` item (a JSON string when
   ``--output-schema`` is used).
+* Images (verified 2026-11-08): ``-i/--image <FILE>`` "Attach images to the first
+  message. Repeatable; supports comma-separated lists"
+  (https://learn.chatgpt.com/docs/developer-commands?surface=cli). It is a shared
+  option (``codex-rs/utils/cli/src/shared_options.rs``: ``value_delimiter = ','``,
+  ``num_args = 1..``), so it greedily takes following non-flag values, including the
+  ``-`` prompt argument; the ``--image`` pairs therefore come before the other flags.
+  Each path becomes a ``UserInput::LocalImage`` that Codex itself reads with
+  ``std::fs::read`` (``codex-rs/protocol/src/models.rs``), so a relative path is
+  resolved against the child's cwd, and the read-only sandbox (which confines
+  model-run commands) does not apply to it. Accepted formats are sniffed from the
+  bytes: PNG, JPEG, GIF and WebP (``codex-rs/utils/image/src/lib.rs``). The attachment
+  is independent of ``features.view_image``, which only registers the model's own
+  ``view_image`` tool ("Enable the built-in local image viewer",
+  ``codex-rs/features/src/lib.rs``,
+  ``codex-rs/core/src/tools/handlers/view_image_spec.rs``); that tool stays off.
 * Usage in ``turn.completed``: ``input_tokens`` (includes ``cached_input_tokens``;
   Codex itself computes non-cached input as ``input_tokens - cached_input_tokens``),
   ``cached_input_tokens``, ``cache_write_input_tokens``, ``output_tokens`` and
@@ -41,8 +56,9 @@ Verified 2026-11-08 against the official docs and the openai/codex source at tag
   ``output_tokens``).
 
 Files written by :meth:`CodexCliProvider.build_invocation` (system instructions, output
-schema) go only into the given temp ``cwd`` and are referenced by fixed *relative*
-names, so argv never carries a path. This relies on the child running with
+schema, attached images under fixed names ``img-1.png``, ``img-2.jpg``, ...) go only
+into the given temp ``cwd`` and are referenced by fixed *relative* names, so argv never
+carries a path or a user filename. This relies on the child running with
 ``invocation.cwd`` as its working directory, which ``run_cli`` guarantees (ADR 0002 rule
 5). The final message is parsed from stdout; ``-o`` is not used.
 """
@@ -55,6 +71,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
+from llm_crossjury.core.attachments.render import fallback_block
 from llm_crossjury.core.providers.api._common import (
     ModelLookup,
     format_instructions,
@@ -62,8 +79,11 @@ from llm_crossjury.core.providers.api._common import (
     validate_prompt,
 )
 from llm_crossjury.core.providers.base import (
+    Attachment,
+    AttachmentKind,
     Backend,
     Capabilities,
+    CapabilityNotSupportedError,
     CompletionRequest,
     CompletionResult,
     Message,
@@ -87,6 +107,18 @@ INSTRUCTIONS_FILE = "codex-instructions.md"
 
 SCHEMA_FILE = "codex-output-schema.json"
 """Strict JSON schema, written into the temp cwd (``--output-schema``)."""
+
+IMAGE_FILE_PREFIX = "img-"
+"""Attached images are written into the temp cwd as ``img-<n>.<ext>`` (``--image``)."""
+
+IMAGE_EXTENSIONS: Mapping[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+}
+"""Image media types Codex decodes (sniffed from the bytes), with the fixed file
+extension used for each. Other image types fall back to text or are refused."""
 
 BASE_ARGS: tuple[str, ...] = (
     "exec",
@@ -222,6 +254,63 @@ def render_stdin(messages: Sequence[Message]) -> str:
     return "\n\n".join(f"[{m.role.value}]\n{m.content}" for m in messages)
 
 
+def write_images(
+    messages: Sequence[Message],
+    input_modalities: frozenset[AttachmentKind],
+    cwd: Path,
+    *,
+    model: str,
+) -> tuple[list[Message], list[str]]:
+    """Write native images into ``cwd`` and inline every other attachment as text.
+
+    An image of a type in :data:`IMAGE_EXTENSIONS` goes to ``cwd`` as
+    ``img-<n>.<ext>`` (numbered in message order) when ``IMAGE`` is in
+    ``input_modalities``. Every other attachment is appended to its message as the
+    canonical fallback block (ADR 0007). The user's filename never reaches argv.
+
+    Args:
+        messages: The non-system messages, in order.
+        input_modalities: Attachment kinds sent natively.
+        cwd: The temp working directory the child runs in.
+        model: Model id, for error messages.
+
+    Returns:
+        The messages without attachments (fallback text inlined) and the relative
+        names of the written images, in order.
+
+    Raises:
+        CapabilityNotSupportedError: an attachment can be sent neither natively nor
+            as text (an image of an unsupported type, or without image support).
+    """
+    names: list[str] = []
+    out: list[Message] = []
+    for message in messages:
+        if not message.attachments:
+            out.append(message)
+            continue
+        blocks: list[str] = []
+        for att in message.attachments:
+            ext = IMAGE_EXTENSIONS.get(att.media_type)
+            if att.kind is AttachmentKind.IMAGE and att.kind in input_modalities and ext:
+                name = f"{IMAGE_FILE_PREFIX}{len(names) + 1}.{ext}"
+                (cwd / name).write_bytes(att.data)
+                names.append(name)
+            else:
+                blocks.append(_text_block(att, model))
+        content = "\n\n".join([message.content, *blocks]) if blocks else message.content
+        out.append(Message(role=message.role, content=content))
+    return out, names
+
+
+def _text_block(att: Attachment, model: str) -> str:
+    if att.fallback_text is None:
+        raise CapabilityNotSupportedError(
+            f"openai model {model!r} via the codex CLI cannot receive "
+            f"{att.filename!r} ({att.media_type}); images must be PNG, JPEG, GIF or WebP"
+        )
+    return fallback_block(att)
+
+
 class CodexCliProvider(CliProviderBase):
     """Runs ``codex exec`` non-interactively in a read-only sandbox with an empty cwd.
 
@@ -288,7 +377,10 @@ class CodexCliProvider(CliProviderBase):
         """Capabilities of ``model`` through ``codex exec``.
 
         ``structured_output`` iff the registry entry says ``True`` (``--output-schema``
-        is a documented ``codex exec`` flag). ``reasoning`` iff the entry has a
+        is a documented ``codex exec`` flag). ``input_modalities`` is ``{IMAGE}`` for
+        a registered model (``--image`` is a documented ``codex exec`` flag), unless
+        the entry's ``input_modalities`` is verified and lacks ``IMAGE``. PDFs and
+        documents are sent as extracted text. ``reasoning`` iff the entry has a
         levels/budget mapping and a ``cli_flags.reasoning`` template. Caching, batch and
         temperature cannot be controlled through the CLI.
 
@@ -313,22 +405,27 @@ class CodexCliProvider(CliProviderBase):
             and entry.cli_flags is not None
             and entry.cli_flags.reasoning is not None
         )
+        declared = entry.input_modalities
+        images = declared is None or AttachmentKind.IMAGE in declared
         return Capabilities(
             structured_output=entry.structured_output is True,
             caching=False,
             batch=False,
             temperature=False,
             reasoning=reasoning,
+            input_modalities=frozenset({AttachmentKind.IMAGE}) if images else frozenset(),
         )
 
     def build_invocation(self, request: CompletionRequest, cwd: Path) -> CliInvocation:
         """Translate ``request`` into a locked-down ``codex exec`` invocation.
 
-        Writes ``codex-instructions.md`` (system messages, if any) and
-        ``codex-output-schema.json`` (if native structured output applies) into
-        ``cwd``. Without native structured output, format instructions are appended to
-        the prompt instead. ``temperature``, ``max_output_tokens`` and ``native_params``
-        cannot be passed to the CLI safely and are ignored.
+        Writes ``codex-instructions.md`` (system messages, if any),
+        ``codex-output-schema.json`` (if native structured output applies) and one
+        ``img-<n>.<ext>`` per native image (passed as ``--image <name>``) into ``cwd``.
+        Other attachments are inlined as fallback text. Without native structured
+        output, format instructions are appended to the prompt instead. ``temperature``,
+        ``max_output_tokens`` and ``native_params`` cannot be passed to the CLI safely and
+        are ignored.
 
         Args:
             request: The completion request.
@@ -339,12 +436,22 @@ class CodexCliProvider(CliProviderBase):
 
         Raises:
             ProviderError: invalid prompt or no usable registry ``cli_flags``.
+            CapabilityNotSupportedError: an attachment cannot be sent.
         """
         prompt = request.prompt
         validate_prompt(prompt.stable_prefix, prompt.variable_suffix)
         registry_args = self._registry_args(request)
 
+        messages = [m for m in prompt.stable_prefix if m.role is not Role.SYSTEM]
+        messages += prompt.variable_suffix
+        messages, images = write_images(
+            messages, self.capabilities(request.model).input_modalities, cwd, model=request.model
+        )
+
         args: list[str] = list(BASE_ARGS)
+        # --image is greedy (num_args = 1..): each pair is followed by a flag, never "-".
+        for name in images:
+            args += ["--image", name]
         for override in LOCKDOWN_OVERRIDES:
             args += ["-c", override]
         args += registry_args
@@ -356,8 +463,6 @@ class CodexCliProvider(CliProviderBase):
             (cwd / INSTRUCTIONS_FILE).write_text(system_text, encoding="utf-8")
             args += ["-c", f"model_instructions_file={INSTRUCTIONS_FILE}"]
 
-        messages = [m for m in prompt.stable_prefix if m.role is not Role.SYSTEM]
-        messages += prompt.variable_suffix
         stdin_text = render_stdin(messages)
         if request.response_schema is not None:
             if self.capabilities(request.model).structured_output:
