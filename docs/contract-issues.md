@@ -39,6 +39,21 @@ Template:
   `structured_output`.
 - Status: open
 
+### CI-6: `ModelEntry.input_modalities` is documented as "on the `api` backend"
+- Date / reporter: 2026-11-08 / cli-img-claude agent (Claude Code native images)
+- File / symbol: `registry/schema.py` `ModelEntry.input_modalities` (docstring only)
+- Problem: The docstring says the field lists the kinds a model accepts natively "on
+  the `api` backend". The Claude Code CLI adapter now sends images and PDFs natively
+  too (stream-json stdin, ADR 0007 as amended), and it reuses the same field: which
+  kinds a model accepts is a fact about the model, not the transport. A CLI may
+  deliver fewer kinds than the model accepts, so each CLI adapter intersects the
+  field with the kinds it implements (`claude_code.NATIVE_KINDS`).
+- Impact: None at runtime; the wording is only misleading.
+- Proposed change: Reword the docstring to "Attachment kinds the model accepts
+  natively (a model fact; each backend adapter delivers the subset it implements)".
+  If CLI and API ever diverge for one model, add a separate `cli_input_modalities`.
+- Status: open
+
 ## Approved changes
 
 ### CI-1: Pre-phase-1 contract changes (approved by the maintainer, 2026-11-04)
