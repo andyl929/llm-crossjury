@@ -158,8 +158,14 @@ def test_cli_backend_needs_flags() -> None:
         _registry(_entry("a", backends=(Backend.CLI,)))
 
 
-def test_load_shipped_example_registry() -> None:
+def test_load_shipped_registry() -> None:
     registry = ModelRegistry.load(REPO_ROOT / "config" / "models.yaml")
+    assert registry.entries()
+    assert registry.unverified() == ()
+
+
+def test_load_example_registry() -> None:
+    registry = ModelRegistry.load(REPO_ROOT / "config" / "models.example.yaml")
     assert registry.entries()
     assert len(registry.unverified()) == len(registry.entries())
 
