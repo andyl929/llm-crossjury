@@ -67,6 +67,8 @@ _BANNER_CSS = """\
 }
 """
 DEMO_CSS_PATH = "/demo.css"
+_PAGES_WITH_OWN_BADGE = frozenset({"/", "/index.html"})
+"""Pages whose UI reads ``demo`` from ``/api/providers`` and shows its own badge."""
 
 
 def shipped_registry_path() -> Path:
@@ -179,6 +181,8 @@ def _add_banner(app: FastAPI) -> None:
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         response = await call_next(request)
+        if request.url.path in _PAGES_WITH_OWN_BADGE:
+            return response  # the compare page shows its own demo badge (#demo-badge)
         if not response.headers.get("content-type", "").startswith("text/html"):
             return response
         body_iterator = getattr(response, "body_iterator", None)

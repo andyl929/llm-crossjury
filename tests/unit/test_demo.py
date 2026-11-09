@@ -268,13 +268,19 @@ def test_synthesis_with_two_answers_keeps_only_valid_disputes(tmp_path: Path) ->
         assert len(point["positions"]) >= 2
 
 
-def test_pages_carry_the_demo_banner(tmp_path: Path) -> None:
+def test_demo_is_always_labelled(tmp_path: Path) -> None:
     client = _client(tmp_path)
-    for path in ("/", "/settings"):
-        page = client.get(path)
-        assert page.status_code == 200
-        assert f'id="{BANNER_ID}"' in page.text
-        assert '<link rel="stylesheet" href="/demo.css">' in page.text
+    # The compare page shows its own badge from the providers endpoint...
+    home = client.get("/")
+    assert home.status_code == 200
+    assert 'id="demo-badge"' in home.text
+    assert f'id="{BANNER_ID}"' not in home.text
+    assert client.get("/api/providers").json()["demo"] is True
+    # ...other pages get the injected banner.
+    page = client.get("/settings")
+    assert page.status_code == 200
+    assert f'id="{BANNER_ID}"' in page.text
+    assert '<link rel="stylesheet" href="/demo.css">' in page.text
     css = client.get("/demo.css")
     assert css.status_code == 200
     assert ".demo-banner" in css.text
@@ -327,7 +333,9 @@ def test_ui_demo_serves_the_demo_app(monkeypatch: pytest.MonkeyPatch) -> None:
     (call,) = spy.calls
     assert call["port"] == 9123
     client = TestClient(call["app"], base_url="http://127.0.0.1")
-    assert BANNER_ID in client.get("/").text
+    # The temp data dir is gone once uvicorn.run (stubbed) returns: check pages only.
+    assert 'id="demo-badge"' in client.get("/").text
+    assert BANNER_ID in client.get("/settings").text
     assert "OPENAI_API_KEY" not in os.environ
 
 
