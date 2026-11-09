@@ -51,7 +51,7 @@ smooth key onboarding are first-class, not afterthoughts.
 - Local run history (titles, cost, date; content only if `store_content` is on).
 - Hallway test: 5 classmates use it on their own question; fix the top issues.
 
-### M1.5: Sessions, chat and memory (in progress, 2026-11-09)
+### M1.5: Sessions, chat and memory (done, 2026-11-09)
 
 Results survive navigation and closed pages; continue any jury answer as a chat; ask
 the jury again mid-conversation (closed loop); layered memory keeps long research
@@ -65,7 +65,7 @@ conversations affordable. Budget defaults raised and editable. Design:
 | C | memory layer: context layers, summaries, FTS retrieval, case file |
 | D | integration: jury inside a conversation, end-to-end tests |
 
-### M1.6: New-user onboarding (queued; confirm scope with the maintainer first)
+### M1.6: New-user onboarding (in progress, 2026-11-09)
 
 Guide the first setup end to end: subscription mode (install and sign in to Claude
 Code, Codex, Grok CLI; live check), API keys (extend the existing key wizard), and a
