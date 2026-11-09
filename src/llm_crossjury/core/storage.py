@@ -9,7 +9,10 @@ Layout under ``platformdirs.user_data_dir("llm-crossjury", appauthor=False)``
     checkpoints/<run_id>/       paused-run snapshot incl. content (temporary: deleted
                                 on completion or after checkpoint_retention_days)
     attachments/<sha256>/       uploaded task attachments (temporary, owner-only:
-                                deleted 24 h after upload; see core.attachments.store)
+                                deleted 24 h after upload unless a stored session
+                                refers to them; see core.attachments.store)
+    sessions/<id>.json          web UI conversations (owner-only; prompt and response
+                                text; see core.sessions.store, ADR 0008)
 """
 
 from __future__ import annotations
@@ -37,6 +40,8 @@ class DataPaths:
     ledger: Path
     runs: Path
     checkpoints: Path
+    sessions: Path
+    """Web UI sessions (created owner-only by the session store, not here)."""
 
 
 def resolve_data_paths(override: Path | None = None) -> DataPaths:
@@ -74,6 +79,7 @@ def resolve_data_paths(override: Path | None = None) -> DataPaths:
         ledger=root / "ledger.sqlite3",
         runs=root / "runs",
         checkpoints=root / "checkpoints",
+        sessions=root / "sessions",
     )
     try:
         for directory in (paths.root, paths.runs, paths.checkpoints):

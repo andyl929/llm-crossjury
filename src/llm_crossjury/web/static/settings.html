@@ -94,7 +94,7 @@
         <h3>Your spending limits</h3>
         <p>These limits protect you from unexpected costs. Runs that could exceed them are refused before any call is made.</p>
         <dl id="wizard-budget" class="budget-list"></dl>
-        <p class="help">These are the current defaults (read-only here).</p>
+        <p class="help">You can change them at any time under Settings, Budget.</p>
       </div>
 
       <div class="wizard-step" data-step="6" hidden>
@@ -124,6 +124,78 @@
         <p class="help rack-loading">Loading&hellip;</p>
       </div>
       <p id="store-note" class="help store-note"></p>
+    </section>
+
+    <section id="budget-section" class="panel app-section" aria-labelledby="budget-title">
+      <h2 id="budget-title" class="panel-title">Budget</h2>
+      <p class="help section-intro">Runs whose high estimate exceeds a limit are refused before any call is made. Amounts are in <span id="budget-currency">USD</span>.</p>
+      <form id="budget-form" class="app-form" autocomplete="off" novalidate>
+        <div class="app-fields">
+          <div class="field">
+            <label class="field-label" for="budget-run">Limit per run</label>
+            <input id="budget-run" type="number" inputmode="decimal" min="0.01" step="0.01" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="budget-daily">Daily limit</label>
+            <input id="budget-daily" type="number" inputmode="decimal" min="0.01" step="0.01" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="budget-confirm">Ask before runs above</label>
+            <input id="budget-confirm" type="number" inputmode="decimal" min="0" step="0.01" required>
+          </div>
+        </div>
+        <p id="budget-spent" class="help" aria-live="polite"></p>
+        <p id="budget-defaults" class="help"></p>
+        <div class="actions">
+          <button id="budget-save" type="submit" class="btn btn-primary">Save budget</button>
+          <button id="budget-reset" type="button" class="btn">Restore defaults</button>
+          <span id="budget-status" class="status" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+
+    <section id="history-section" class="panel app-section" aria-labelledby="history-title">
+      <h2 id="history-title" class="panel-title">History</h2>
+      <p class="help section-intro">Conversations are saved on this computer only, in your user data folder, readable only by your user account. Their text is sent only to the models you ask.</p>
+      <div class="app-form">
+        <label class="check-row" for="history-save">
+          <input id="history-save" type="checkbox">
+          <span>Save conversations on this computer</span>
+        </label>
+        <p class="help">When off, new conversations are kept in memory only and are lost when the server stops. Conversations saved earlier stay until you delete them.</p>
+        <div class="actions">
+          <span id="history-status" class="status" aria-live="polite"></span>
+        </div>
+        <div class="actions danger-zone">
+          <button id="history-clear" type="button" class="btn btn-danger">Delete all conversations</button>
+          <span id="history-clear-status" class="status" aria-live="polite"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="memory-section" class="panel app-section" aria-labelledby="memory-title">
+      <h2 id="memory-title" class="panel-title">Memory</h2>
+      <p class="help section-intro">In long conversations, a memory model writes short summaries of older turns, so each call sends a compact context instead of the whole transcript.</p>
+      <form id="memory-form" class="app-form" autocomplete="off" novalidate>
+        <div class="app-fields">
+          <div class="field">
+            <label class="field-label" for="memory-model">Memory model</label>
+            <select id="memory-model" aria-describedby="memory-model-help">
+              <option value="auto">Automatic</option>
+            </select>
+            <p id="memory-model-help" class="help">Automatic: a fast model on a signed-in subscription (no extra cost), else the cheapest fast model with an API key.</p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="memory-budget">Context budget (tokens)</label>
+            <input id="memory-budget" type="number" inputmode="numeric" min="8000" step="1000" required aria-describedby="memory-budget-help">
+            <p id="memory-budget-help" class="help">Upper bound on the context sent with one call; never more than the model's own window.</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="memory-save" type="submit" class="btn btn-primary">Save memory settings</button>
+          <span id="memory-status" class="status" aria-live="polite"></span>
+        </div>
+      </form>
     </section>
 
     <div id="message" class="message" role="alert" hidden></div>

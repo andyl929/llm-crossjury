@@ -125,3 +125,33 @@ def test_entries_are_owner_only(tmp_path: Path) -> None:
     assert stat.S_IMODE(os.stat(entry).st_mode) == 0o700
     for name in ("data.bin", "meta.json"):
         assert stat.S_IMODE(os.stat(entry / name).st_mode) == 0o600
+
+
+def test_keep_callback_protects_session_attachments(tmp_path: Path) -> None:
+    clock = Clock()
+    kept_ids: set[str] = set()
+    store = AttachmentStore(tmp_path, clock=clock, keep=lambda: frozenset(kept_ids))
+    kept = store.put(built(AttachmentKind.PDF, name="kept.pdf"))
+    gone = store.put(built(AttachmentKind.DOCUMENT, name="gone.docx"))
+    kept_ids.add(kept)
+    clock.now += ATTACHMENT_TTL_S + 1
+    assert store.purge_expired() == 1
+    assert store.get(kept).attachment.filename == "kept.pdf"  # expired but referenced
+    assert not (tmp_path / gone).exists()
+    kept_ids.clear()
+    with pytest.raises(AttachmentNotFoundError):
+        store.get(kept)
+
+
+def test_keep_callback_survives_restart_and_errors(tmp_path: Path) -> None:
+    clock = Clock()
+    kept = AttachmentStore(tmp_path, clock=clock).put(built(AttachmentKind.PDF, name="a.pdf"))
+    clock.now += ATTACHMENT_TTL_S + 1
+    AttachmentStore(tmp_path, clock=clock, keep=lambda: frozenset({kept}))  # start-up purge
+    assert (tmp_path / kept).exists()
+
+    def broken() -> frozenset[str]:
+        raise RuntimeError("boom")
+
+    AttachmentStore(tmp_path, clock=clock, keep=broken)  # keeps nothing, never raises
+    assert not (tmp_path / kept).exists()

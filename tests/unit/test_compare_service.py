@@ -162,7 +162,7 @@ def test_estimate_and_budget_status() -> None:
     status = budget_status(estimate, deps)
     assert not status.refused
     assert not status.needs_confirmation
-    assert status.daily_remaining == Decimal("5.00")
+    assert status.daily_remaining == Decimal("15.00")
 
 
 def test_budget_status_needs_confirmation() -> None:
@@ -173,7 +173,7 @@ def test_budget_status_needs_confirmation() -> None:
 
 
 def test_budget_status_refuses_above_daily_remaining() -> None:
-    deps = make_deps(ledger=FakeLedger(spent_today=Decimal("4.95")))
+    deps = make_deps(ledger=FakeLedger(spent_today=Decimal("14.95")))
     status = budget_status(asyncio.run(estimate_compare(TASK, _all(), deps)), deps)
     assert status.refused
     assert status.refusal_reason is not None

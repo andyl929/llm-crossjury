@@ -12,7 +12,8 @@ never inside the repository::
 Directories are created owner-only (``0o700``) and files ``0o600`` where the platform
 supports POSIX permissions (on Windows the user profile's ACLs apply). Entries older
 than :data:`ATTACHMENT_TTL_S` are deleted when the store is created (app start-up),
-on every upload, and when an expired entry is requested.
+on every upload, and when an expired entry is requested, except entries that a
+stored session still refers to (the ``keep`` callback; ADR 0008).
 """
 
 from __future__ import annotations
@@ -77,6 +78,8 @@ class AttachmentStore:
         root: Directory of the store (created owner-only if missing).
         ttl_s: Lifetime of an entry in seconds.
         clock: Returns the current time in seconds since the epoch (tests inject one).
+        keep: Returns the ids that must survive the TTL (attachments of stored
+            sessions); ``None`` = none. Replace it later with :meth:`set_keep`.
     """
 
     def __init__(
@@ -85,10 +88,12 @@ class AttachmentStore:
         *,
         ttl_s: float = ATTACHMENT_TTL_S,
         clock: Callable[[], float] = time.time,
+        keep: Callable[[], frozenset[str]] | None = None,
     ) -> None:
         self._root = root
         self._ttl = ttl_s
         self._clock = clock
+        self._keep = keep
         _mkdir_private(root)
         self.purge_expired()
 
@@ -96,6 +101,18 @@ class AttachmentStore:
     def root(self) -> Path:
         """The store directory."""
         return self._root
+
+    def set_keep(self, keep: Callable[[], frozenset[str]] | None) -> None:
+        """Replace the callback naming the ids kept past the TTL."""
+        self._keep = keep
+
+    def _kept(self) -> frozenset[str]:
+        if self._keep is None:
+            return frozenset()
+        try:
+            return self._keep()
+        except Exception:  # a broken callback must never stop uploads or purging
+            return frozenset()
 
     def _entry(self, attachment_id: str) -> Path:
         if not is_attachment_id(attachment_id):
@@ -141,7 +158,7 @@ class AttachmentStore:
             raise _not_found(attachment_id) from None
         try:
             created = float(meta["created_at"])
-            if self._expired(created):
+            if self._expired(created) and attachment_id not in self._kept():
                 self.delete(attachment_id)
                 raise _not_found(attachment_id)
             if hashlib.sha256(data).hexdigest() != attachment_id:
@@ -179,7 +196,8 @@ class AttachmentStore:
         return True
 
     def purge_expired(self) -> int:
-        """Delete every entry older than the TTL (and unreadable entries).
+        """Delete every entry older than the TTL (and unreadable entries), except
+        the ids the ``keep`` callback names.
 
         Returns:
             The number of deleted entries.
@@ -189,6 +207,7 @@ class AttachmentStore:
             children = list(self._root.iterdir())
         except OSError:
             return 0
+        kept: frozenset[str] | None = None
         for child in children:
             if not child.is_dir() or not is_attachment_id(child.name):
                 continue
@@ -201,6 +220,10 @@ class AttachmentStore:
                 except OSError:
                     continue
             if self._expired(created):
+                if kept is None:
+                    kept = self._kept()
+                if child.name in kept:
+                    continue
                 shutil.rmtree(child, ignore_errors=True)
                 removed += 1
         return removed

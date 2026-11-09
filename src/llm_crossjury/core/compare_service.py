@@ -470,6 +470,8 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
         },
     )
     load_dotenv(base_dir / ".env", override=False)
+    from llm_crossjury.core.sessions.store import stored_attachment_ids  # noqa: PLC0415
+
     data = resolve_data_paths()
     registry = ModelRegistry.load(resolve_models_path(base_dir))
     pricing = PricingTable(registry)
@@ -500,7 +502,11 @@ def build_default_deps(base_dir: Path) -> CompareDeps:
         estimator=estimator,
         ledger=SqliteLedger(data.ledger),
         budget=BudgetConfig(),
-        attachment_store=AttachmentStore(data.root / "attachments"),
+        # Until the web app wires its session store in, the start-up purge keeps the
+        # attachments of the sessions on disk.
+        attachment_store=AttachmentStore(
+            data.root / "attachments", keep=lambda: stored_attachment_ids(data.sessions)
+        ),
     )
 
 

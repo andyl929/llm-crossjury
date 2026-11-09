@@ -12,7 +12,7 @@ from llm_crossjury.core.compare_service import CompareDeps
 from llm_crossjury.core.config import BudgetConfig
 from llm_crossjury.core.providers.base import ProviderError
 from llm_crossjury.web import create_app
-from tests.unit._compare_fakes import FakeLedger, make_deps, raising_provider
+from tests.unit._compare_fakes import FakeLedger, make_deps, raising_provider, settings_for
 from tests.unit._synthesis_fakes import FakeStages
 
 KEY_ENVS = {
@@ -31,7 +31,10 @@ ANSWERS = [
 
 
 def _client(deps: CompareDeps) -> TestClient:
-    return TestClient(create_app(lambda: deps), base_url="http://127.0.0.1")
+    return TestClient(
+        create_app(lambda: deps, settings_store=settings_for(deps.budget)),
+        base_url="http://127.0.0.1",
+    )
 
 
 def _body(**extra: Any) -> dict[str, Any]:
