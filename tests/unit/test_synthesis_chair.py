@@ -189,7 +189,7 @@ def test_run_chair_builds_spec_and_outcome() -> None:
     assert spec.stage == STAGE
     assert (spec.provider, spec.model_id) == ("fake", "fake-chair")
     assert spec.response_schema == strict_json_schema(Synthesis)
-    assert spec.max_output_tokens == MAX_OUTPUT_TOKENS == 8192
+    assert spec.max_output_tokens == MAX_OUTPUT_TOKENS == 32_000
 
     prefix = spec.prompt.stable_prefix[0].content
     for answer in ANSWERS:
@@ -429,7 +429,7 @@ def test_estimate_is_one_call_with_heuristics() -> None:
 
 
 def test_estimate_output_is_capped() -> None:
-    long_answers = [AnonAnswer(label="Response A", text="word " * 20000)]
+    long_answers = [AnonAnswer(label="Response A", text="word " * 60000)]
     plan = estimate_chair(
         long_answers, CHAIR, task=TASK, with_reviews=True, extra_instructions=None
     )[0]

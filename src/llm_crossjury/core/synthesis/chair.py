@@ -53,7 +53,7 @@ from llm_crossjury.core.synthesis.types import (
 
 STAGE = "chair"
 PROMPT_ID = "synthesis/chair.v1"
-MAX_OUTPUT_TOKENS = 8192
+MAX_OUTPUT_TOKENS = 32_000
 """Output cap of the chair call (a product setting)."""
 
 _MIN_POSITIONS = 2

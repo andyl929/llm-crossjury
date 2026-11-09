@@ -103,7 +103,7 @@ ALIAS_NAMES: tuple[str, ...] = ("fast", "balanced", "best")
 DEFAULT_MAX_OUTPUT_TOKENS = 4096
 """Product setting (not a model fact): default output cap per member call."""
 
-DEFAULT_TIMEOUT_S = 300.0
+DEFAULT_TIMEOUT_S = 900.0
 """Product setting: per-call timeout so a hung vendor call cannot block the run."""
 
 ESTIMATE_LOW_OUTPUT_DIVISOR = 8

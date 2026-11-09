@@ -44,7 +44,7 @@ from llm_crossjury.core.synthesis.types import (
 STAGE = "agreement"
 PROMPT_ID = "synthesis/agreement.v1"
 
-MAX_OUTPUT_TOKENS = 4096
+MAX_OUTPUT_TOKENS = 16_000
 """Output cap of the judge call (product setting)."""
 
 MIN_SEGMENT_WORDS = 4

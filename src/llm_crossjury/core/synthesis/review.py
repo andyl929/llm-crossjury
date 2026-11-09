@@ -52,7 +52,7 @@ from llm_crossjury.core.synthesis.types import (
 STAGE = "review"
 PROMPT_ID = "synthesis/review.v1"
 
-MAX_OUTPUT_TOKENS = 3000
+MAX_OUTPUT_TOKENS = 8_000
 """Output cap per reviewer call (product setting)."""
 
 FULL_MAX_ANSWERS = 3

@@ -170,7 +170,7 @@ def test_spec_settings_and_prompt_layout() -> None:
     spec = build_agreement_spec(ANSWERS, JUDGE, task="Which database should I use?")
     assert spec.stage == STAGE
     assert (spec.provider, spec.model_id) == ("fake", "fake-judge")
-    assert spec.max_output_tokens == MAX_OUTPUT_TOKENS == 4096
+    assert spec.max_output_tokens == MAX_OUTPUT_TOKENS == 16_000
     assert spec.response_schema == strict_json_schema(AgreementJudgment)
     assert PROMPT_ID == "synthesis/agreement.v1"
 
