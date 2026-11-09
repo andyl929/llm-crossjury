@@ -107,6 +107,12 @@ def test_markdown_links_are_limited_to_http_and_open_without_opener() -> None:
     assert 'rel: "noopener noreferrer"' in script
 
 
+def test_page_shows_a_demo_badge_when_the_server_says_demo() -> None:
+    client = _client(make_deps())
+    assert 'id="demo-badge"' in client.get("/").text
+    assert "data.demo !== true" in client.get("/app.js").text
+
+
 def test_page_has_keyboard_shortcut_and_skip_link() -> None:
     client = _client(make_deps())
     page = client.get("/").text

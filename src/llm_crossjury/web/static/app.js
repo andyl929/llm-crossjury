@@ -137,7 +137,7 @@
   // A fix to offer next to an error message, if the text points at one.
   function fixFor(text) {
     if (/\b(api key|key|unauthori[sz]ed|401|403|permission)\b/i.test(text)) {
-      return el("a", { href: "/settings", class: "message-fix" }, "Open Settings to add or test the key");
+      return settingsLink("Open Settings to add or test the key", "message-fix");
     }
     if (/\bbudget|daily limit|run limit\b/i.test(text)) {
       return el("span", { class: "message-fix" }, "Pick fewer or cheaper models, or lower Max output tokens under the model's settings.");
@@ -146,6 +146,12 @@
       return el("span", { class: "message-fix" }, "Open \u201cInstall and sign in\u201d on the model's row, then press Re-check.");
     }
     return null;
+  }
+
+  // Settings opens in a new tab once there are answers, so they are not lost.
+  function settingsLink(text, cls) {
+    return el("a", { href: "/settings", class: cls || null, target: "_blank", rel: "noopener" },
+      [text, el("span", { class: "visually-hidden", text: " (opens in a new tab)" })]);
   }
 
   function fillMessage(box, text) {
@@ -372,7 +378,7 @@
 
     let hint = null;
     if (keyMissing) {
-      hint = el("p", { class: "hint" }, [el("a", { href: "/settings", text: "Add an API key for " + p.label + " in Settings" }),
+      hint = el("p", { class: "hint" }, [settingsLink("Add an API key for " + p.label + " in Settings"),
         p.cli ? ", or switch to Subscription." : "."]);
     } else if (noModels && isCli) {
       if (!cliMissing) hint = el("p", { class: "hint", text: "No usable models: add a registry entry with the cli backend and cli_flags." });
@@ -432,6 +438,7 @@
       state.defaultMaxTokens = data.default_max_output_tokens;
       state.budget = data.budget;
       state.consentText = data.consent_text;
+      $("demo-badge").hidden = data.demo !== true;
       $("consent-text").textContent = data.consent_text;
       $("syn-consent-text").textContent = data.consent_text;
       renderStrip();
@@ -443,6 +450,20 @@
       showMessage(error.message);
     }
     updateButtons();
+  }
+
+  // Back from the Settings tab: pick up new keys without losing the selection.
+  async function refreshProvidersIfChanged() {
+    if (state.busy || document.visibilityState !== "visible" || !state.providers.length) return;
+    try {
+      const data = await api("/api/providers");
+      state.budget = data.budget;
+      renderStrip();
+      if (JSON.stringify(data.providers) !== JSON.stringify(state.providers)) {
+        state.providers = data.providers;
+        renderProviders();
+      }
+    } catch (_) { /* keep what is on screen */ }
   }
 
   // ------------------------------------------------------------------ attachments
@@ -783,7 +804,7 @@
     $("results").replaceChildren(...req.selections.map((s) =>
       el("article", { class: "answer", "aria-busy": "true" }, [
         answerHead(s.provider, s.model, s.backend, null, null),
-        el("div", { class: "answer-pending" }, [
+        el("div", { class: "answer-pending pending" }, [
           el("div", { class: "pending-line" }, [el("span", { class: "spinner" }), el("span", { class: "elapsed", text: "Waiting for the answer" })]),
           el("div", { class: "skeleton" }), el("div", { class: "skeleton" }), el("div", { class: "skeleton" }), el("div", { class: "skeleton" }),
         ]),
@@ -1933,6 +1954,13 @@
     $("export-btn").addEventListener("click", exportMarkdown);
     $("sync-scroll").addEventListener("change", (e) => { state.syncScroll = e.target.checked; });
     document.addEventListener("keydown", onShortcut);
+    document.addEventListener("visibilitychange", refreshProvidersIfChanged);
+    // Answers live only in this page: ask before leaving it once there are some.
+    window.addEventListener("beforeunload", (event) => {
+      if (!state.run) return;
+      event.preventDefault();
+      event.returnValue = "";
+    });
     initShortcutHints();
     initAttachments();
     initSynthesis();
