@@ -215,9 +215,10 @@ def test_full_synthesis_flow(tmp_path: Path) -> None:
     finish_body = {**base, "seed": agreed["seed"], "run_id": agreed["run_id"], "agreement": outcome}
     finished = client.post("/api/synthesis/finish", json=finish_body).json()
     labels = finished["labels"]
-    ranking = [r["label"] for r in finished["reviews"]["ranking"]]
-    assert ranking[0] == _label_of(labels, "anthropic")
-    assert ranking[-1] == _label_of(labels, "openai")
+    # Ring review (k = 2): which answers meet depends on the seed, so ties are possible.
+    scores = {r["label"]: r["score"] for r in finished["reviews"]["ranking"]}
+    assert scores[_label_of(labels, "anthropic")] == max(scores.values())
+    assert scores[_label_of(labels, "openai")] == min(scores.values())
     chair = finished["chair"]
     assert chair["synthesis"]["final_text"] == script.FINAL_TEXT
     assert len(chair["additional"]["disputed"]) == len(script.DISPUTES)
