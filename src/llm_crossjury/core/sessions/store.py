@@ -93,6 +93,8 @@ def _interrupted(turn: Turn) -> Turn:
         if isinstance(stage, str) and stage:
             synthesis[f"{stage}_error"] = INTERRUPTED_ERROR
         changes["synthesis"] = synthesis
+    if isinstance(turn, JuryTurn) and turn.retrying:
+        changes["retrying"] = ()
     return turn.model_copy(update=changes) if changes else turn
 
 

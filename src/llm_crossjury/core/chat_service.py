@@ -189,7 +189,9 @@ def _validate(
         raise SelectionError("The continued turn is not a jury turn of this session.")
     if source.source == "member":
         members = turn.step1.members if turn.step1 is not None else ()
-        if source.member_index is None or not 0 <= source.member_index < len(members):
+        index = source.member_index
+        # While step 1 runs, a finished member can be continued from members_done.
+        if index is None or not (0 <= index < len(members) or index in turn.members_done):
             raise SelectionError("The continued member answer does not exist.")
 
 
