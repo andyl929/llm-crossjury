@@ -1245,6 +1245,11 @@ body.app-home {
   .toast { bottom: 170px; max-width: calc(100vw - 32px); }
 }
 
+@media (max-width: 419px) {
+  /* Keep the top bar on one row: the mark alone names the app. */
+  .brand-name { display: none; }
+}
+
 /* ------------------------------------------------------------------ tour */
 
 .tour {

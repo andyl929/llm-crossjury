@@ -65,11 +65,16 @@ conversations affordable. Budget defaults raised and editable. Design:
 | C | memory layer: context layers, summaries, FTS retrieval, case file |
 | D | integration: jury inside a conversation, end-to-end tests |
 
-### M1.6: New-user onboarding (in progress, 2026-11-09)
+### M1.6: New-user onboarding (done, 2026-11-09)
 
 Guide the first setup end to end: subscription mode (install and sign in to Claude
 Code, Codex, Grok CLI; live check), API keys (extend the existing key wizard), and a
 very short tutorial (first jury question, continue a chat, ask the jury again).
+
+Shipped: the first run opens a 4-step wizard when no provider is usable (no key, no
+ready CLI); one-click install and sign-in from a fixed whitelist of the vendors'
+official commands, with copyable commands as the fallback (ADR 0002, amended
+2026-11-09); a four-step "How it works" tour on the home page.
 
 ### M1.7: Small public eval (queued, after M1.6; hard cap $5-10)
 

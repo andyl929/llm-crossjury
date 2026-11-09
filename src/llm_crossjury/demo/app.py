@@ -254,6 +254,7 @@ def create_demo_app(
         demo=True,
         sessions_path=data_dir / "sessions",
         settings_store=settings,
+        setup_enabled=False,  # never install or sign in to real tools from the demo
     )
     _add_banner(app)
     return app

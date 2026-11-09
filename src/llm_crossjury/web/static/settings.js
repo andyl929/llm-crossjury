@@ -19,6 +19,9 @@
     cliLoaded: false,
     cliLoading: false,
     rechecked: false,
+    setup: null,        // GET /api/setup: one-click install and sign-in, if offered
+    jobs: {},           // provider -> latest setup job
+    jobTimer: null,
     busy: false,
     app: null,
     providers: null,
@@ -308,7 +311,6 @@
     $("wizard-skip").hidden = index === steps.length - 1;  // Done has its own two exits
     // One primary action in view: on the key step that is "Save and test".
     $("wizard-next").className = "btn" + (state.step === "keys" ? "" : " btn-primary");
-    if (state.step === "subs") loadCliStatus(false);
     if (state.step === "keys") renderKeyStep();
     if (state.step === "done") renderDone();
     if (moveFocus) {
@@ -325,6 +327,17 @@
   }
 
   // -------------------------------------------------------------- subscriptions
+  //
+  // Rendered twice: in the wizard's Subscriptions step and in Settings, Subscriptions.
+  // "Install" and "Sign in" start the vendor's official command on the server
+  // (POST /api/setup/...), only after the user confirms it; the copyable commands stay
+  // as the fallback. The page polls the job, then re-checks the CLI.
+
+  const HOSTS = [
+    { rows: "cli-rows", status: "cli-status", recheck: "cli-recheck", tip: "cli-tip" },
+    { rows: "subs-rows", status: "subs-status", recheck: "subs-recheck", tip: "subs-tip" },
+  ];
+  const JOB_POLL_MS = 1000;
 
   function copyButton(text, what) {
     const button = el("button", {
@@ -334,7 +347,9 @@
       let ok = false;
       try { await navigator.clipboard.writeText(text); ok = true; } catch (_) { ok = false; }
       button.setAttribute("title", ok ? "Copied" : "Copy failed: select the text and copy it");
-      setStatus($("cli-status"), ok ? "Copied: " + text : "Copy failed. Select the command and copy it.", ok ? "result-valid" : "result-error");
+      for (const host of HOSTS) {
+        if ($(host.status)) setStatus($(host.status), ok ? "Copied." : "Copy failed. Select the text and copy it.", ok ? "result-valid" : "result-error");
+      }
     });
     return button;
   }
@@ -347,6 +362,219 @@
     const all = cli.install_commands || [];
     const mine = all.filter((c) => c.platform === state.os || c.platform === "any");
     return mine.length ? mine : all;
+  }
+
+  // A <dialog> asking before a command runs. Resolves true on confirm.
+  function confirmDialog(title, paragraphs, confirmText) {
+    return new Promise((resolve) => {
+      const titleId = "setup-dialog-title";
+      const ok = el("button", { type: "submit", value: "ok", class: "btn btn-primary", text: confirmText });
+      const cancel = el("button", { type: "submit", value: "cancel", class: "btn", text: "Cancel" });
+      const form = el("form", { method: "dialog", class: "dialog-form" }, [
+        el("h2", { id: titleId, class: "dialog-title", text: title }),
+        ...paragraphs.map((p) => (p instanceof Node ? p : el("p", { class: "dialog-text", text: p }))),
+        el("div", { class: "actions dialog-actions" }, [cancel, ok]),
+      ]);
+      const dlg = el("dialog", { class: "dialog", "aria-labelledby": titleId }, form);
+      dlg.addEventListener("close", () => { resolve(dlg.returnValue === "ok"); dlg.remove(); });
+      document.body.append(dlg);
+      dlg.showModal();
+      ok.focus();
+    });
+  }
+
+  function setupFor(name) {
+    const info = state.setup;
+    return info && info.enabled ? info.clis.find((c) => c.name === name) || null : null;
+  }
+
+  async function loadSetup() {
+    try {
+      state.setup = await api("GET", "/api/setup");
+      for (const c of state.setup.clis || []) {
+        if (c.job) state.jobs[c.name] = c.job;
+      }
+    } catch (_) {
+      state.setup = null;  // an older server: commands to copy only
+    }
+    renderCliRows();
+    scheduleJobPoll();
+  }
+
+  function jobRunning(name) {
+    const job = state.jobs[name];
+    return !!job && job.state === "running";
+  }
+
+  async function startJob(p, kind, mode) {
+    const setup = setupFor(p.name);
+    if (!setup) return;
+    const product = p.cli.product;
+    let ok;
+    if (kind === "install") {
+      ok = await confirmDialog("Install " + product + "?", [
+        "This runs the vendor's official installer on this computer. It can take a few minutes.",
+        el("p", { class: "dialog-text" }, el("code", { class: "cmd", text: setup.install.command })),
+      ], "Install");
+    } else {
+      const option = setup.login.find((o) => o.mode === mode);
+      ok = await confirmDialog("Sign in to " + product + "?", [
+        mode === "device"
+          ? product + " shows a link and a code here. Open the link, enter the code, and sign in with your " + p.cli.plan + " account."
+          : "A browser window opens with the vendor's sign-in page. Sign in with your " + p.cli.plan + " account, then come back here.",
+        el("p", { class: "dialog-text" }, el("code", { class: "cmd", text: option ? option.command : "" })),
+        "llm-crossjury never sees your password or sign-in token.",
+      ], "Sign in");
+    }
+    if (!ok) return;
+    try {
+      const path = "/api/setup/" + encodeURIComponent(p.name) + "/" + kind;
+      state.jobs[p.name] = await api("POST", path, kind === "login" ? { mode: mode } : {});
+    } catch (err) {
+      state.jobs[p.name] = { state: "failed", kind: kind, mode: mode || null, message: err.message, output: "", device: null, command: "" };
+    }
+    renderCliRows(p.name + ":cancel");
+    scheduleJobPoll();
+  }
+
+  async function cancelJob(name) {
+    const job = state.jobs[name];
+    if (!job || !job.id) return;
+    try {
+      state.jobs[name] = await api("POST", "/api/setup/jobs/" + encodeURIComponent(job.id) + "/cancel", {});
+    } catch (_) { /* the next poll shows the state */ }
+    renderCliRows();
+  }
+
+  function scheduleJobPoll() {
+    if (state.jobTimer) return;
+    if (!Object.keys(state.jobs).some(jobRunning)) return;
+    state.jobTimer = window.setTimeout(pollJobs, JOB_POLL_MS);
+  }
+
+  async function pollJobs() {
+    state.jobTimer = null;
+    let finished = false;
+    for (const name of Object.keys(state.jobs).filter(jobRunning)) {
+      try {
+        const job = await api("GET", "/api/setup/jobs/" + encodeURIComponent(state.jobs[name].id));
+        if (job.state !== "running") finished = true;
+        state.jobs[name] = job;
+      } catch (_) { /* keep polling */ }
+    }
+    if (finished) {
+      await loadCliStatus(true);  // the server dropped its cached check; re-check now
+      if (state.app) loadProvidersInfo();
+    } else {
+      renderCliRows();
+    }
+    scheduleJobPoll();
+  }
+
+  const JOB_TEXT = {
+    install: { running: "Installing", succeeded: "Installed.", failed: "Install failed.", cancelled: "Install cancelled.", timed_out: "Install stopped: it took too long." },
+    login: { running: "Waiting for you to sign in", succeeded: "Sign-in finished.", failed: "Sign-in failed.", cancelled: "Sign-in cancelled.", timed_out: "Sign-in stopped: it took too long." },
+  };
+
+  function safeLink(url, text) {
+    const href = safeHttpsUrl(url);
+    if (!href) return el("span", { text: text });
+    return el("a", { href: href, target: "_blank", rel: "noopener noreferrer", class: "btn btn-small" }, [
+      text, icon("external"), el("span", { class: "visually-hidden", text: " (opens in a new tab)" }),
+    ]);
+  }
+
+  function jobPanel(p) {
+    const job = state.jobs[p.name];
+    if (!job) return null;
+    const running = job.state === "running";
+    const texts = JOB_TEXT[job.kind] || JOB_TEXT.install;
+    const ok = job.state === "succeeded";
+    const line = el("p", { class: "job-line" + (running ? "" : ok ? " result-valid" : " result-error") }, [
+      running ? el("span", { class: "spinner" }) : icon(ok ? "check" : "alert"),
+      el("span", { text: running ? texts.running + "\u2026" : texts[job.state] || job.message }),
+      !running && !ok && job.message ? el("span", { class: "job-why", text: " " + job.message }) : null,
+    ]);
+    const parts = [line];
+    if (job.device && running) {
+      parts.push(el("div", { class: "device-box" }, [
+        el("p", { class: "help", text: "Open the sign-in page and enter this code:" }),
+        el("div", { class: "device-code-row" }, [
+          el("code", { class: "device-code", text: job.device.code }),
+          copyButton(job.device.code, "sign-in code"),
+          safeLink(job.device.url, "Open sign-in page"),
+        ]),
+      ]));
+    } else if (running && job.kind === "login") {
+      parts.push(el("p", { class: "help", text: job.mode === "device"
+        ? "Waiting for the link and code\u2026"
+        : "Finish signing in in the browser window that opened. No window? Cancel and use a code instead, or run the command yourself." }));
+    }
+    if (!running && !ok) {
+      parts.push(el("p", { class: "help", text: "Run the command yourself in a terminal instead (see below), then click Check again." }));
+    }
+    if (job.output) {
+      parts.push(el("details", { class: "job-output-box", open: !running && !ok }, [
+        el("summary", { text: "Output" }),
+        el("pre", { class: "job-output", tabindex: "0", text: job.output }),
+      ]));
+    }
+    if (running) {
+      parts.push(el("div", { class: "actions" }, el("button", {
+        type: "button", class: "btn btn-small", "data-key": p.name + ":cancel", text: "Cancel",
+        onclick: () => cancelJob(p.name),
+      })));
+    }
+    return el("div", { class: "job-panel", role: "status", "aria-live": "polite" }, parts);
+  }
+
+  function actionButtons(p) {
+    const setup = setupFor(p.name);
+    const cli = p.cli;
+    if (!setup || jobRunning(p.name)) return null;
+    const buttons = [];
+    if (cli.state === "not_installed") {
+      if (setup.install.available) {
+        buttons.push(el("button", { type: "button", class: "btn", "data-key": p.name + ":install", onclick: () => startJob(p, "install") },
+          [icon("download"), "Install " + cli.product]));
+      } else {
+        return el("p", { class: "key-warn" }, [setup.install.missing + " ",
+          setup.install.missing_url ? vendorLink(setup.install.missing_url, "nodejs.org") : null]);
+      }
+    } else if (cli.state === "signed_out" || (cli.state === "ready" && !cli.login_checked)) {
+      if (setup.login.some((o) => o.mode === "browser")) {
+        buttons.push(el("button", { type: "button", class: "btn", "data-key": p.name + ":login", onclick: () => startJob(p, "login", "browser") },
+          [icon("external"), "Sign in"]));
+      }
+      if (setup.login.some((o) => o.mode === "device")) {
+        buttons.push(el("button", { type: "button", class: "btn btn-link", "data-key": p.name + ":device", onclick: () => startJob(p, "login", "device"), text: "Use a code instead" }));
+      }
+    }
+    return buttons.length ? el("div", { class: "actions cli-actions" }, buttons) : null;
+  }
+
+  // The commands to run by hand: the fallback for anything the buttons cannot do.
+  function manualSteps(p, open, collapsible) {
+    const cli = p.cli;
+    const steps = [];
+    if (cli.state === "not_installed") {
+      const commands = installCommands(cli);
+      steps.push(el("li", {}, [
+        el("span", { class: "cmd-label", text: "Install" }),
+        ...commands.map((c, i) => el("div", { class: "cmd-option" }, [
+          i > 0 ? el("span", { class: "help", text: "or, " + c.label }) : (commands.length > 1 ? el("span", { class: "help", text: c.label }) : null),
+          commandLine(c.command, cli.product + " install command"),
+        ])),
+      ]));
+    }
+    steps.push(el("li", {}, [
+      el("span", { class: "cmd-label", text: "Sign in" }),
+      commandLine(cli.sign_in_command, cli.product + " sign-in command"),
+      el("span", { class: "help", text: cli.sign_in }),
+    ]));
+    const list = el("ol", { class: "cmd-steps" }, steps);
+    if (!collapsible) return list;
+    return el("details", { class: "manual", open: open }, [el("summary", { text: setupFor(p.name) ? "Or run it yourself in a terminal" : "Run it in a terminal" }), list]);
   }
 
   function cliRow(p) {
@@ -362,44 +590,44 @@
       cli.experimental ? el("span", { class: "tag tag-warn", text: "Experimental" }) : null,
       el("span", { class: "lamp " + lampCls, text: lampText }),
     ]);
+    const job = state.jobs[p.name];
+    const failed = !!job && ["failed", "timed_out", "cancelled"].includes(job.state);
     const body = [];
     if (cli.state === "ready") {
       body.push(el("p", { class: "help", text: cli.login_checked
         ? "Signed in" + version + ". Pick Subscription on its model row."
-        : "Installed" + version + ". It cannot report its sign-in, so if you have not signed in yet, run " + cli.sign_in_command + " once in a terminal." }));
-    } else if (cli.state !== "not_checked") {
-      const steps = [];
-      if (cli.state === "not_installed") {
-        const commands = installCommands(cli);
-        steps.push(el("li", {}, [
-          el("span", { class: "cmd-label", text: "Install" }),
-          ...commands.map((c, i) => el("div", { class: "cmd-option" }, [
-            i > 0 ? el("span", { class: "help", text: "or, " + c.label }) : (commands.length > 1 ? el("span", { class: "help", text: c.label }) : null),
-            commandLine(c.command, cli.product + " install command"),
-          ])),
-        ]));
-      }
-      steps.push(el("li", {}, [
-        el("span", { class: "cmd-label", text: "Sign in" }),
-        commandLine(cli.sign_in_command, cli.product + " sign-in command"),
-        el("span", { class: "help", text: cli.sign_in }),
-      ]));
-      body.push(el("ol", { class: "cmd-steps" }, steps));
+        : "Installed" + version + ". It cannot report its sign-in: if you have not signed in yet, sign in once." }));
+    }
+    body.push(jobPanel(p), actionButtons(p));
+    const setup = setupFor(p.name);
+    if (cli.state === "not_installed" || cli.state === "signed_out") {
+      body.push(manualSteps(p, failed || (cli.state === "not_installed" && !!setup && !setup.install.available), !!setup));
+    } else if (cli.state === "ready" && !cli.login_checked) {
+      body.push(manualSteps(p, failed, true));
     }
     return el("div", { class: "cli-row", "data-provider": p.name }, [head, ...body]);
   }
 
-  function renderCliRows() {
+  function renderCliRows(focusKey) {
+    const active = document.activeElement;
+    const key = focusKey || (active && active.dataset ? active.dataset.key : null);
     const rows = (state.providers || []).filter((p) => p.cli);
-    const box = $("cli-rows");
-    if (!rows.length) {
-      box.replaceChildren(el("p", { class: "help rack-empty", text: "No subscription tools are offered in this setup." }));
-      return;
+    for (const host of HOSTS) {
+      const box = $(host.rows);
+      if (!box) continue;
+      if (!state.providers) continue;
+      box.replaceChildren(...(rows.length ? rows.map(cliRow)
+        : [el("p", { class: "help rack-empty", text: "No subscription tools are offered in this setup." })]));
     }
-    box.replaceChildren(...rows.map(cliRow));
-    document.querySelector(".os-switch").hidden = !rows.some((p) => p.cli.state === "not_installed");
+    for (const sw of document.querySelectorAll(".os-switch")) {
+      sw.hidden = !rows.some((p) => p.cli.state === "not_installed");
+    }
     for (const button of document.querySelectorAll(".os-switch [data-os]")) {
       button.setAttribute("aria-pressed", String(button.dataset.os === state.os));
+    }
+    if (key) {
+      const target = Array.from(document.querySelectorAll('[data-key="' + key + '"]')).find((n) => n.offsetParent !== null);
+      if (target) target.focus();
     }
   }
 
@@ -407,11 +635,12 @@
     if (state.cliLoading) return;
     if (!refresh && state.providers && state.cliLoaded) { renderCliRows(); return; }
     state.cliLoading = true;
-    const button = $("cli-recheck");
-    button.disabled = true;
-    const status = $("cli-status");
-    status.replaceChildren(el("span", { class: "spinner" }), el("span", { text: "Checking\u2026" }));
-    status.className = "status";
+    const hosts = HOSTS.filter((h) => $(h.status));
+    for (const h of hosts) {
+      $(h.recheck).disabled = true;
+      $(h.status).replaceChildren(el("span", { class: "spinner" }), el("span", { text: "Checking\u2026" }));
+      $(h.status).className = "status";
+    }
     try {
       const data = await api("GET", "/api/providers" + (refresh ? "?refresh=true" : ""));
       state.providers = data.providers;
@@ -420,15 +649,28 @@
       renderCliRows();
       const clis = data.providers.filter((p) => p.cli);
       const ready = clis.filter((p) => p.cli.state === "ready").length;
-      setStatus(status, ready + " of " + clis.length + " ready.", ready ? "result-valid" : "muted");
       if (refresh) state.rechecked = true;
-      $("cli-tip").hidden = !(state.os === "windows" && state.rechecked && clis.some((p) => p.cli.state === "not_installed"));
+      for (const h of hosts) {
+        setStatus($(h.status), ready + " of " + clis.length + " ready.", ready ? "result-valid" : "muted");
+        $(h.tip).hidden = !(state.os === "windows" && state.rechecked && clis.some((p) => p.cli.state === "not_installed"));
+      }
     } catch (err) {
-      setStatus(status, err.message, "result-error");
+      for (const h of hosts) setStatus($(h.status), err.message, "result-error");
     } finally {
       state.cliLoading = false;
-      button.disabled = false;
+      for (const h of hosts) $(h.recheck).disabled = false;
     }
+  }
+
+  function initSubscriptions() {
+    state.os = detectOs();
+    for (const button of document.querySelectorAll(".os-switch [data-os]")) {
+      button.addEventListener("click", () => { state.os = button.dataset.os; renderCliRows(); });
+    }
+    for (const h of HOSTS) {
+      if ($(h.recheck)) $(h.recheck).addEventListener("click", () => loadCliStatus(true));
+    }
+    loadCliStatus(false).then(loadSetup);
   }
 
   // -------------------------------------------------------------- API keys
@@ -519,32 +761,26 @@
     $("wizard").hidden = false;
     $("open-wizard").hidden = true;
     $("main").classList.add("wizard-open");
-    state.os = detectOs();
     state.step = "welcome";
     renderWizardStep(false);
     for (const radio of document.querySelectorAll('input[name="wizard-path"]')) {
       radio.addEventListener("change", () => { state.path = radio.value; renderProgress(); });
-    }
-    for (const button of document.querySelectorAll(".os-switch [data-os]")) {
-      button.addEventListener("click", () => { state.os = button.dataset.os; renderCliRows(); });
     }
     $("wizard-next").addEventListener("click", () => goStep(1));
     $("wizard-back").addEventListener("click", () => goStep(-1));
     $("wizard-skip").addEventListener("click", () => finishWizard(leaveTarget()));
     $("wizard-finish").addEventListener("click", () => finishWizard("/"));
     $("wizard-example").addEventListener("click", () => finishWizard("/?example=1"));
-    $("cli-recheck").addEventListener("click", () => loadCliStatus(true));
     $("wizard-provider").addEventListener("change", () => { renderKeyLink(); setStatus($("wizard-save-status"), "", null); });
     $("wizard-save-form").addEventListener("submit", saveAndTest);
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector("dialog[open]")) return;  // Esc closes the dialog only
       const t = event.target;
       if (t && t.id === "wizard-key" && t.value) { t.value = ""; return; }  // first Esc clears the key
       event.preventDefault();
       finishWizard(leaveTarget());
     });
-    // The subscription states load in the background (the first check can take a few seconds).
-    loadCliStatus(false);
   }
 
   // ------------------------------------------------------------------ app settings
@@ -746,6 +982,8 @@
       ]);
       state.onboarding = onboarding;
       if (wizardRequested()) initWizard();
+      // Subscription states load in the background (the first check can take seconds).
+      initSubscriptions();
     } catch (err) {
       showMessage(err.message);
     }

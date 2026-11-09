@@ -157,8 +157,10 @@ The UI opens at <http://127.0.0.1:8765/>. Use `--port` to pick another port and
 
 On first start, when no model is usable yet, a short setup opens: choose your
 subscriptions, API keys or both, follow the steps, and start with an example
-question. Reopen it any time from **Settings** (*Open setup wizard*). The **?** button
-on the home page replays a four-step tour.
+question. For subscriptions, **Install** and **Sign in** run the vendor's official
+commands for you, only when you click (the commands are also shown to copy). Reopen
+the setup any time from **Settings** (*Open setup wizard*). The **?** button on the
+home page replays a four-step tour.
 
 **Try it without keys:** `uv run llm-crossjury ui --demo` starts the same UI with
 simulated models and canned answers. It makes no network calls, costs nothing, and
@@ -177,7 +179,9 @@ folder, or as one-line key files (`.anthropic.key`, `.openai.key`, `.gemini.key`
 
 ### Use a subscription instead
 
-1. Install the vendor's official CLI and sign in yourself, once, in a terminal:
+1. Click **Install** and **Sign in** under *Settings, Subscriptions* (or in the setup
+   wizard), or install the vendor's official CLI and sign in yourself, once, in a
+   terminal:
    - **Claude Code:** `curl -fsSL https://claude.ai/install.sh | bash` (macOS, Linux,
      WSL), `irm https://claude.ai/install.ps1 | iex` (Windows PowerShell) or
      `winget install Anthropic.ClaudeCode`. Then run `claude` and sign in with your
@@ -193,7 +197,8 @@ folder, or as one-line key files (`.anthropic.key`, `.openai.key`, `.gemini.key`
    usage limits, and their cost per call is unknown.
 
 llm-crossjury runs the CLI with tools, file access and command execution turned off,
-in an empty temporary folder, and never reads the CLI's login files. See
+in an empty temporary folder, and never reads the CLI's login files. Install and sign-in
+run only on your click, from a fixed list of the vendors' official commands. See
 [ADR 0002](docs/adr/0002-cli-backend-security-boundary.md).
 
 **Coming next:** a PyPI package (`uvx llm-crossjury ui`) and one-click desktop builds

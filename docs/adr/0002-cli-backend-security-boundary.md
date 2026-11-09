@@ -5,6 +5,7 @@
 - Amended: 2026-11-04 (Grok Build CLI no longer pre-skipped)
 - Amended: 2026-11-08 (status per CLI after implementation; SIWC rejected)
 - Amended: 2026-11-08 (native images/PDFs for Claude Code over stdin)
+- Amended: 2026-11-09 (one-click install and sign-in, on an explicit click only)
 
 ## Context
 
@@ -62,8 +63,38 @@ must get model output from them **without** becoming a credential-handling tool 
 - It never checks login state by inspecting files. `providers check` may only run a
   vendor-documented status or version subcommand that spends no tokens.
 - It never runs an interactive login on the user's behalf, and never automates a
-  browser login.
+  browser login. *Amended 2026-11-09:* see "One-click install and sign-in" below for
+  the one exception, a click by the user.
 - It never sends a CLI's identity to any process other than that CLI.
+
+### One-click install and sign-in
+
+*Amended 2026-11-09.* So that users never need a terminal, the setup wizard and the
+Settings page may, **on an explicit click and after a confirmation that shows the exact
+command**, run the vendor's own install or sign-in command
+(`llm_crossjury.web.setup_api`):
+
+- Only commands from a fixed whitelist in code: the official installers from the
+  vendors' install docs (`winget install Anthropic.ClaudeCode` or `install.ps1` /
+  `install.sh` for Claude Code, `npm install -g @openai/codex`, Grok Build's
+  `install.ps1` / `install.sh`) and the sign-in subcommands (`claude auth login
+  --claudeai`, `codex login [--device-auth]`, `grok login --oauth|--device-auth`).
+  The client names a CLI and an action, never a command or an argument. Programs are
+  resolved with `shutil.which` and started from an argument list; where the official
+  installer is a shell one-liner, the shell receives that fixed literal.
+- Nothing runs automatically: not at start-up, not on a status check, not on retry.
+- The sign-in itself happens in the vendor's own browser page (or its device-code
+  page). llm-crossjury does not automate the browser, never sees a password or token,
+  still never reads credential files, and passes no secret to the child: every
+  `*_API_KEY` variable is removed from its environment (otherwise the user's normal
+  environment, because these are the user's own tools).
+- One job per CLI, a hard timeout (10 min install, 5 min sign-in) that kills the
+  process tree, and a Cancel button. Output is redacted (tokens, paths, link paths and
+  queries) before it is kept or shown; only a device-code link and code pass through,
+  because the user must see them.
+- If a command cannot run (for example Node.js is missing for Codex) or fails, the UI
+  shows the same commands to copy and run by hand.
+- The demo never offers these actions.
 
 ### Skip conditions
 

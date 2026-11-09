@@ -22,6 +22,7 @@
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5v.01"/></symbol>
     <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 10A8 8 0 0 0 5.2 7.3L4 9M4 4.5V9h4.5M4.5 14a8 8 0 0 0 14.3 2.7L20 15M20 19.5V15h-4.5"/></symbol>
   </svg>
 
@@ -72,7 +73,7 @@
 
       <div class="wizard-step" data-step="subs" hidden>
         <h3>Connect your subscriptions</h3>
-        <p>For each plan you have, install the vendor's tool and sign in once in a terminal, then click Check again. llm-crossjury never runs these commands and never reads your sign-in.</p>
+        <p>For each plan you have, install the vendor's tool and sign in once. The buttons run the vendor's official commands, only when you click; you can also run them yourself in a terminal. llm-crossjury never sees your password or sign-in token.</p>
         <div class="os-switch" role="group" aria-label="Show commands for">
           <button type="button" class="btn btn-small" data-os="windows" aria-pressed="false">Windows</button>
           <button type="button" class="btn btn-small" data-os="unix" aria-pressed="false">macOS or Linux</button>
@@ -80,7 +81,7 @@
         <div id="cli-rows" class="rack cli-rows">
           <p class="help rack-loading">Checking&hellip;</p>
         </div>
-        <p id="cli-tip" class="help cli-tip" hidden>Just installed it? Open a new terminal to sign in, so the new command is found. If this page still says Not installed, restart llm-crossjury.</p>
+        <p id="cli-tip" class="help cli-tip" hidden>Just installed it? If this page still says Not installed, restart llm-crossjury. Signing in by hand? Open a new terminal first, so the new command is found.</p>
         <div class="actions">
           <button id="cli-recheck" type="button" class="btn">
             <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Check again
@@ -143,6 +144,25 @@
         <p class="help rack-loading">Loading&hellip;</p>
       </div>
       <p id="store-note" class="help store-note"></p>
+    </section>
+
+    <section id="subs-section" class="panel app-section" aria-labelledby="subs-title">
+      <h2 id="subs-title" class="panel-title">Subscriptions</h2>
+      <p class="help section-intro">Use Claude Code, Codex or Grok Build with your own plan instead of an API key. Install and Sign in run the vendor's official commands, only when you click.</p>
+      <div class="os-switch" role="group" aria-label="Show commands for">
+        <button type="button" class="btn btn-small" data-os="windows" aria-pressed="false">Windows</button>
+        <button type="button" class="btn btn-small" data-os="unix" aria-pressed="false">macOS or Linux</button>
+      </div>
+      <div id="subs-rows" class="rack cli-rows">
+        <p class="help rack-loading">Checking&hellip;</p>
+      </div>
+      <p id="subs-tip" class="help cli-tip" hidden>Just installed it? If this page still says Not installed, restart llm-crossjury.</p>
+      <div class="actions">
+        <button id="subs-recheck" type="button" class="btn">
+          <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Check again
+        </button>
+        <span id="subs-status" class="status" aria-live="polite"></span>
+      </div>
     </section>
 
     <section id="budget-section" class="panel app-section" aria-labelledby="budget-title">

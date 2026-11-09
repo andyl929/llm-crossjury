@@ -121,6 +121,7 @@ from llm_crossjury.web.settings_api import (
     OnboardingSubscription,
     create_settings_router,
 )
+from llm_crossjury.web.setup_api import SetupJobs, create_setup_router
 
 LOOPBACK_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
 """Default ``Host`` header values the app accepts."""
@@ -542,6 +543,10 @@ class CliCheckCache:
                     self._results[n] = (done, status)
             return {n: self._results[n][1] for n in names}
 
+    def invalidate(self, name: str) -> None:
+        """Forget ``name``'s result, so the next request checks it again."""
+        self._results.pop(name, None)
+
     def peek(self, deps: CompareDeps) -> dict[str, ProviderStatus | None]:
         """The last result per ``cli`` provider (``None``: never checked). Runs nothing."""
         names = [name for name, backend in deps.providers if backend is Backend.CLI]
@@ -907,6 +912,21 @@ class _StaticFileRoute(Route):
         return Response(content=text, media_type=media)
 
 
+def _add_setup_routes(
+    app: FastAPI, jobs: SetupJobs | None, enabled: bool, cli_checks: CliCheckCache
+) -> None:
+    """One-click install and sign-in (off in demo mode); a finished job drops the
+    cached check of its CLI."""
+    manager = (jobs or SetupJobs()) if enabled else None
+    if manager is not None:
+        if manager.on_finish is None:
+            manager.on_finish = cli_checks.invalidate
+        app.router.on_shutdown.append(manager.shutdown)
+    app.state.crossjury_setup = manager
+    hosts: Sequence[str] = app.state.crossjury.allowed_hosts
+    app.include_router(create_setup_router(manager, allowed_hosts=hosts))
+
+
 def _static_files() -> dict[str, tuple[str, str]]:
     """``name -> (text, media type)`` for every servable file of the static package."""
     static = resources.files("llm_crossjury.web").joinpath("static")
@@ -952,6 +972,8 @@ def create_app(
     task_runner: TaskRunnerLike | None = None,
     case_file_builder: CaseFileBuilder | None = None,
     extra_routers: Sequence[RouterFactory] = (),
+    setup_jobs: SetupJobs | None = None,
+    setup_enabled: bool = True,
 ) -> FastAPI:
     """Create the compare UI app.
 
@@ -977,6 +999,9 @@ def create_app(
             ``app.state.crossjury.case_file_builder``.
         extra_routers: Router factories called with the :class:`AppContext` and
             included before the static files route.
+        setup_jobs: Install and sign-in job manager override (default: the official
+            whitelist, see :mod:`llm_crossjury.web.setup_api`).
+        setup_enabled: ``False`` turns the install and sign-in actions off (demo).
     """
     app = FastAPI(
         title="llm-crossjury",
@@ -1066,6 +1091,7 @@ def create_app(
     app.include_router(
         create_chat_router(deps, sessions, ctx.tasks, settings.get, None, index=memory_index)
     )
+    _add_setup_routes(app, setup_jobs if setup_enabled else None, setup_enabled, cli_checks)
     for factory in extra_routers:
         app.include_router(factory(ctx))
     app.router.routes.append(_StaticFileRoute(files))
