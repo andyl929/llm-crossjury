@@ -292,7 +292,7 @@ class _Context:
     store_path: Path | None
     ui_state_path: Path | None
     tester: KeyTester
-    budget: BudgetConfig
+    budget: Callable[[], BudgetConfig]
 
     def store(self) -> Path:
         return self.store_path if self.store_path is not None else key_store_path()
@@ -425,6 +425,7 @@ def _add_onboarding_routes(router: APIRouter, ctx: _Context) -> None:
         except KeyStoreError as exc:
             return _error(500, "key_store", str(exc))
         any_set = any(r.status == "set" for r in infos)
+        budget = ctx.budget()
         dismissed = await asyncio.to_thread(_read_dismissed, ctx.ui_state())
         return OnboardingResponse(
             show=not any_set and not dismissed,
@@ -442,10 +443,10 @@ def _add_onboarding_routes(router: APIRouter, ctx: _Context) -> None:
                 for r in infos
             ),
             budget=OnboardingBudget(
-                currency=ctx.budget.currency,
-                run_limit=ctx.budget.run_limit,
-                confirm_above=ctx.budget.confirm_above,
-                daily_limit=ctx.budget.daily_limit,
+                currency=budget.currency,
+                run_limit=budget.run_limit,
+                confirm_above=budget.confirm_above,
+                daily_limit=budget.daily_limit,
             ),
         )
 
@@ -467,6 +468,10 @@ def _add_onboarding_routes(router: APIRouter, ctx: _Context) -> None:
         return DismissResponse(dismissed=flag)
 
 
+def _fixed(budget: BudgetConfig) -> Callable[[], BudgetConfig]:
+    return lambda: budget
+
+
 def create_settings_router(
     *,
     base_dir: Path,
@@ -475,6 +480,7 @@ def create_settings_router(
     ui_state_path: Path | None = None,
     tester: KeyTester | None = None,
     budget: BudgetConfig | None = None,
+    budget_source: Callable[[], BudgetConfig] | None = None,
 ) -> APIRouter:
     """Create the settings router (key management, onboarding, settings page).
 
@@ -486,6 +492,8 @@ def create_settings_router(
             ``<config dir>/ui-state.json``).
         tester: Key check override (default: :func:`key_check.check_key`).
         budget: Budget shown in the wizard (default: :class:`BudgetConfig` defaults).
+        budget_source: Returns the budget shown in the wizard, read on every request
+            (wins over ``budget``; the app passes the Settings page's budget).
     """
     ctx = _Context(
         base_dir=base_dir,
@@ -493,7 +501,7 @@ def create_settings_router(
         store_path=store_path,
         ui_state_path=ui_state_path,
         tester=tester if tester is not None else key_check.check_key,
-        budget=budget if budget is not None else BudgetConfig(),
+        budget=budget_source if budget_source is not None else _fixed(budget or BudgetConfig()),
     )
     router = APIRouter()
     _add_page_routes(router, ctx)

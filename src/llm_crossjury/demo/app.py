@@ -7,8 +7,9 @@ API. Only the provider calls are simulated (:class:`~llm_crossjury.demo.provider
 
 Isolation:
 
-* All state (ledger, attachments, settings key store, onboarding state) lives under the
-  ``data_dir`` the caller passes, normally a fresh temporary directory.
+* All state (ledger, attachments, sessions, app settings, settings key store,
+  onboarding state) lives under the ``data_dir`` the caller passes, normally a fresh
+  temporary directory.
 * No ``.env``, key file or settings key store of the user is read: the settings page
   looks in an empty directory under ``data_dir``, and the providers need no key.
 * No network call and no subprocess: the simulated providers answer in-process, the
@@ -29,6 +30,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
+from llm_crossjury.core.app_settings import SETTINGS_NAME, AppSettingsStore
 from llm_crossjury.core.attachments.store import AttachmentStore
 from llm_crossjury.core.compare_service import CompareDeps, _cli_providers
 from llm_crossjury.core.config import BudgetConfig, CostConfig
@@ -38,6 +40,7 @@ from llm_crossjury.core.cost.pricing import PricingTable
 from llm_crossjury.core.key_check import KeyTestResult
 from llm_crossjury.core.providers.base import Backend, Provider
 from llm_crossjury.core.registry.resolver import ModelRegistry, ModelResolver, ResolutionMode
+from llm_crossjury.core.sessions.interfaces import AppSettings, BudgetSettings
 from llm_crossjury.demo.providers import DemoProvider
 from llm_crossjury.web import LOOPBACK_HOSTS, create_app
 from llm_crossjury.web.app import CLI_PRODUCTS
@@ -224,6 +227,18 @@ def create_demo_app(
     ui_state = config / "ui-state.json"
     # No key is set in a demo: skip the first-run wizard, which would otherwise open.
     ui_state.write_text(json.dumps({"onboarding_dismissed": True}) + "\n", encoding="utf-8")
+    # Sessions and app settings live under data_dir too, never in the user's real data
+    # or config directory. The demo's default budget is the generous simulated one.
+    settings = AppSettingsStore(
+        config / SETTINGS_NAME,
+        defaults=AppSettings(
+            budget=BudgetSettings(
+                run_limit=deps.budget.run_limit,
+                confirm_above=deps.budget.confirm_above,
+                daily_limit=deps.budget.daily_limit,
+            )
+        ),
+    )
     app = create_app(
         lambda: deps,
         allowed_hosts=allowed_hosts,
@@ -232,6 +247,8 @@ def create_demo_app(
         ui_state_path=ui_state,
         key_tester=demo_key_tester,
         demo=True,
+        sessions_path=data_dir / "sessions",
+        settings_store=settings,
     )
     _add_banner(app)
     return app

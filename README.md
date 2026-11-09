@@ -109,8 +109,9 @@ official CLI you already signed in to: Claude Code, Codex CLI or Grok Build
 ### Cost control
 
 The estimate shows a low to high range per model, using the prices in
-[`config/models.yaml`](config/models.yaml). Built-in limits: $1.00 per run, $5.00 per
-day, and a confirmation above $0.25. A model without a verified price is refused.
+[`config/models.yaml`](config/models.yaml). Built-in limits: $5.00 per run, $15.00 per
+day, and a confirmation above $1.00; change them in Settings. A model without a
+verified price is refused.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/estimate-dark.png">
@@ -252,9 +253,10 @@ any third party, and there is no telemetry.
 - **Spending records** (a local SQLite ledger) hold token counts, costs and durations,
   never prompt or answer text.
 
-**Budget defaults.** $1.00 per run, $5.00 per calendar day, and a confirmation prompt
-for any run estimated above $0.25. The budget line at the top of the UI shows today's
-spend. Prices come only from [`config/models.yaml`](config/models.yaml), where every
+**Budget defaults.** $5.00 per run, $15.00 per calendar day, and a confirmation prompt
+for any run estimated above $1.00, all editable under Settings -> Budget. The budget
+line at the top of the UI shows today's spend. Prices come only from
+[`config/models.yaml`](config/models.yaml), where every
 entry links to the vendor's pricing page and records the date it was checked.
 
 ## Supported models

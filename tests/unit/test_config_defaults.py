@@ -22,9 +22,9 @@ from llm_crossjury.core.registry import ResolutionMode
 
 def test_budget_defaults() -> None:
     budget = BudgetConfig()
-    assert budget.run_limit == Decimal("1.00")
-    assert budget.confirm_above == Decimal("0.25")
-    assert budget.daily_limit == Decimal("5.00")
+    assert budget.run_limit == Decimal("5.00")
+    assert budget.confirm_above == Decimal("1.00")
+    assert budget.daily_limit == Decimal("15.00")
     assert budget.currency == "USD"
     assert budget.allow_unknown_cost is False
 

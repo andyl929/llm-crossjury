@@ -192,8 +192,8 @@ No mode ever stores API keys, OAuth tokens, cookies, or CLI credential paths.
 - `config/models.yaml` is the model registry (ADR 0006). It ships verified entries
   only (source URL and date on each); tests enforce that. `config/models.local.yaml`
   overrides it locally.
-- Budget defaults are built in ($1.00 per run, $0.25 confirmation threshold, $5.00
-  per day). The effective values are printed at the start of every run.
+- Budget defaults are built in ($5.00 per run, $1.00 confirmation threshold, $15.00
+  per day; ADR 0008). The web UI's Settings page overrides them. The effective values are printed at the start of every run.
 - API keys come only from environment variables, which may be loaded from `.env`.
   They are read at call time inside the `api` adapter and never stored on objects that
   get printed, never written to the ledger or run records, and never forwarded to

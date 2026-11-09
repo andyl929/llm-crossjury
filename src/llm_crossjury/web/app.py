@@ -20,6 +20,13 @@ Serves one static page (vanilla HTML/CSS/JS, no build step) and a small JSON API
   the stateless AI synthesis upgrade of a finished comparison (see
   :mod:`llm_crossjury.core.synthesis_service`). The client posts the step-1 material
   and earlier stage outputs back on every call.
+* Sessions (``/api/sessions*``) and app settings (``/api/settings/app``): see
+  :mod:`llm_crossjury.web.sessions_api`. With ``?session=<id>&turn=<turn id>``, the
+  estimate, run and step-2 endpoints record their work in that session and run it
+  detached from the request (see :mod:`llm_crossjury.web.session_hooks`, ADR 0008).
+
+The effective budget of every estimate, run and budget line is ``AppSettings.budget``
+(Settings page), which replaces the limits of the injected ``BudgetConfig``.
 
 The app is meant to listen on localhost. As defense in depth against other web pages
 in the user's browser, it checks the ``Host`` header (DNS rebinding), requires JSON
@@ -32,9 +39,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from importlib import resources
@@ -42,12 +50,19 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.routing import Match, Route
+from starlette.types import Scope
 
+from llm_crossjury.core.app_settings import (
+    AppSettingsStore,
+    default_settings_path,
+    effective_budget,
+)
 from llm_crossjury.core.attachments import AttachmentError, AttachmentTooLargeError
-from llm_crossjury.core.attachments.store import AttachmentNotFoundError
+from llm_crossjury.core.attachments.store import AttachmentNotFoundError, AttachmentStore
 from llm_crossjury.core.compare_service import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_ATTACHMENTS,
@@ -67,10 +82,15 @@ from llm_crossjury.core.compare_service import (
     run_compare,
     usable_models,
 )
+from llm_crossjury.core.config import BudgetConfig
 from llm_crossjury.core.cost.estimate import CostEstimate
 from llm_crossjury.core.cost.pricing import PricingError
 from llm_crossjury.core.providers.base import Backend, ProviderStatus
 from llm_crossjury.core.registry.resolver import ResolutionError
+from llm_crossjury.core.sessions.interfaces import CaseFileBuilder, TaskRunnerLike
+from llm_crossjury.core.sessions.store import SessionStore
+from llm_crossjury.core.sessions.tasks import TaskRunner
+from llm_crossjury.core.storage import DataDirError, resolve_data_paths
 from llm_crossjury.core.synthesis_service import (
     AgreementStepResult,
     FinishRequest,
@@ -86,7 +106,10 @@ from llm_crossjury.core.synthesis_service import (
     run_finish_step,
     run_resynthesis,
 )
+from llm_crossjury.web import session_hooks as hooks
 from llm_crossjury.web.attachments_api import UPLOAD_PATH, create_attachments_router
+from llm_crossjury.web.session_hooks import AppContext
+from llm_crossjury.web.sessions_api import create_sessions_router
 from llm_crossjury.web.settings_api import KeyTester, create_settings_router
 
 LOOPBACK_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
@@ -176,22 +199,20 @@ _SECURITY_HEADERS = {
     "Cache-Control": "no-store",
 }
 
-_STATIC_FILES: dict[str, str] = {
-    "/": "index.html",
-    "/app.js": "app.js",
-    "/app.css": "app.css",
-    "/theme.js": "theme.js",
-    "/favicon.svg": "favicon.svg",
-}
+STATIC_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*\.(js|css|svg|html)$"
+"""Files of the static package directory served at ``/<name>`` (no subdirectories)."""
+
+_STATIC_NAME_RE = re.compile(STATIC_NAME_PATTERN)
 _MEDIA_TYPES = {
-    "index.html": "text/html; charset=utf-8",
-    "app.js": "text/javascript; charset=utf-8",
-    "app.css": "text/css; charset=utf-8",
-    "theme.js": "text/javascript; charset=utf-8",
-    "favicon.svg": "image/svg+xml",
+    "html": "text/html; charset=utf-8",
+    "js": "text/javascript; charset=utf-8",
+    "css": "text/css; charset=utf-8",
+    "svg": "image/svg+xml",
 }
 
 DepsFactory = Callable[[], CompareDeps]
+RouterFactory = Callable[[AppContext], APIRouter]
+"""Builds an extra router from the app's shared objects (see ``create_app``)."""
 KeyStatus = Literal["set", "not set", "not required"]
 
 
@@ -503,8 +524,14 @@ def _confirmation_error(status: BudgetStatus) -> JSONResponse:
 # --------------------------------------------------------------------------- app
 
 
-def _add_synthesis_routes(app: FastAPI, deps: Callable[[], CompareDeps]) -> None:
-    """Register the ``/api/synthesis/*`` endpoints (stateless step 2)."""
+def _add_synthesis_routes(app: FastAPI, ctx: AppContext) -> None:
+    """Register the ``/api/synthesis/*`` endpoints (stateless step 2, session hooks)."""
+    deps = ctx.deps
+
+    def target(session: str | None, turn: str | None) -> JSONResponse | None:
+        if session is None and turn is None:
+            return None
+        return hooks.check_stage_target(ctx, session, turn)
 
     @app.post("/api/synthesis/estimate")
     async def synthesis_estimate(body: SynthesisRequest) -> SynthesisEstimate:
@@ -513,21 +540,37 @@ def _add_synthesis_routes(app: FastAPI, deps: Callable[[], CompareDeps]) -> None
 
     @app.post("/api/synthesis/agreement", response_model=None)
     async def synthesis_agreement(
-        body: SynthesisStartRequest,
+        body: SynthesisStartRequest, session: str | None = None, turn: str | None = None
     ) -> AgreementStepResult | JSONResponse:
         _check_synthesis_size(body)
+        if (bad := target(session, turn)) is not None:
+            return bad
         d = deps()
         status = estimate_synthesis(body, d).budget
         if status.cli_calls and not body.allow_unknown_cost:
             return _consent_error(ConsentRequiredError(status.cli_calls), status)
         if status.needs_confirmation and not body.confirmed:
             return _confirmation_error(status)
-        return await run_agreement_step(body, d)
+        if session is None or turn is None:
+            return await run_agreement_step(body, d)
+        result: AgreementStepResult = await hooks.run_stage(
+            ctx, session, turn, "agreement", run_agreement_step(body, d)
+        )
+        return result
 
-    @app.post("/api/synthesis/finish")
-    async def synthesis_finish(body: FinishRequest) -> FinishStepResult:
+    @app.post("/api/synthesis/finish", response_model=None)
+    async def synthesis_finish(
+        body: FinishRequest, session: str | None = None, turn: str | None = None
+    ) -> FinishStepResult | JSONResponse:
         _check_synthesis_size(body)
-        return await run_finish_step(body, deps())
+        if (bad := target(session, turn)) is not None:
+            return bad
+        if session is None or turn is None:
+            return await run_finish_step(body, deps())
+        result: FinishStepResult = await hooks.run_stage(
+            ctx, session, turn, "finish", run_finish_step(body, deps())
+        )
+        return result
 
     @app.post("/api/synthesis/resynthesize-estimate")
     async def synthesis_resynthesize_estimate(
@@ -540,16 +583,23 @@ def _add_synthesis_routes(app: FastAPI, deps: Callable[[], CompareDeps]) -> None
 
     @app.post("/api/synthesis/resynthesize", response_model=None)
     async def synthesis_resynthesize(
-        body: ResynthesizeRequest,
+        body: ResynthesizeRequest, session: str | None = None, turn: str | None = None
     ) -> ResynthesisResult | JSONResponse:
         _check_synthesis_size(body)
+        if (bad := target(session, turn)) is not None:
+            return bad
         d = deps()
         status = budget_status(estimate_resynthesis(body, d), d)
         if status.cli_calls and not body.allow_unknown_cost:
             return _consent_error(ConsentRequiredError(status.cli_calls), status)
         if status.needs_confirmation and not body.confirmed:
             return _confirmation_error(status)
-        return await run_resynthesis(body, d)
+        if session is None or turn is None:
+            return await run_resynthesis(body, d)
+        result: ResynthesisResult = await hooks.run_stage(
+            ctx, session, turn, "resynthesize", run_resynthesis(body, d)
+        )
+        return result
 
 
 def _add_error_handlers(app: FastAPI) -> None:
@@ -589,49 +639,8 @@ def _add_error_handlers(app: FastAPI) -> None:
         return _error(status, exc.code, str(exc))
 
 
-def create_app(
-    deps_factory: DepsFactory,
-    *,
-    allowed_hosts: Sequence[str] = LOOPBACK_HOSTS,
-    key_base_dir: Path | None = None,
-    key_store_path: Path | None = None,
-    ui_state_path: Path | None = None,
-    key_tester: KeyTester | None = None,
-    demo: bool = False,
-) -> FastAPI:
-    """Create the compare UI app.
-
-    Args:
-        deps_factory: Builds the compare dependencies. Called once, on first use.
-        allowed_hosts: Accepted ``Host`` header names (without port); ``"*"`` accepts
-            any host.
-        key_base_dir: Directory holding ``.env`` and the key files, for the settings
-            page (default: the current directory).
-        key_store_path: Settings key store override (default: the user config dir).
-        ui_state_path: Onboarding state file override (default: the user config dir).
-        key_tester: Key check override for the settings page (default: a real check).
-        demo: Report demo mode in ``GET /api/providers`` (``demo: true``).
-    """
-    app = FastAPI(
-        title="llm-crossjury",
-        docs_url=None,
-        redoc_url=None,
-        openapi_url=None,
-    )
-    hosts = frozenset(h.strip("[]").lower() for h in allowed_hosts)
-    cache: list[CompareDeps] = []
-    cli_checks = CliCheckCache()
-
-    def deps() -> CompareDeps:
-        if not cache:
-            cache.append(deps_factory())
-        return cache[0]
-
-    static = resources.files("llm_crossjury.web").joinpath("static")
-    pages = {
-        path: static.joinpath(name).read_text(encoding="utf-8")
-        for path, name in _STATIC_FILES.items()
-    }
+def _add_guard(app: FastAPI, hosts: frozenset[str]) -> None:
+    """Host allow-list, JSON-only POST bodies, cross-origin refusal, security headers."""
 
     @app.middleware("http")
     async def guard(
@@ -661,31 +670,18 @@ def create_app(
             response.headers.setdefault(name, value)
         return response
 
-    _add_error_handlers(app)
 
-    def page(path: str) -> Response:
-        name = _STATIC_FILES[path]
-        return Response(content=pages[path], media_type=_MEDIA_TYPES[name])
+def _add_compare_routes(
+    app: FastAPI, ctx: AppContext, files: Mapping[str, tuple[str, str]], *, demo: bool
+) -> None:
+    """Register ``/``, ``/api/providers``, ``/api/estimate`` and ``/api/run``."""
+    deps = ctx.deps
+    cli_checks = CliCheckCache()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> Response:
-        return page("/")
-
-    @app.get("/app.js")
-    async def app_js() -> Response:
-        return page("/app.js")
-
-    @app.get("/app.css")
-    async def app_css() -> Response:
-        return page("/app.css")
-
-    @app.get("/theme.js")
-    async def theme_js() -> Response:
-        return page("/theme.js")
-
-    @app.get("/favicon.svg")
-    async def favicon() -> Response:
-        return page("/favicon.svg")
+        text, media = files["index.html"]
+        return Response(content=text, media_type=media)
 
     @app.get("/api/providers")
     async def providers(refresh: bool = False) -> ProvidersResponse:
@@ -699,11 +695,19 @@ def create_app(
             demo=demo,
         )
 
-    @app.post("/api/estimate")
-    async def estimate(body: CompareRequest) -> EstimateResponse:
+    @app.post("/api/estimate", response_model=None)
+    async def estimate(
+        body: CompareRequest, session: str | None = None
+    ) -> EstimateResponse | JSONResponse:
+        task = body.task
+        if session is not None:
+            found = hooks.get_session(ctx, session)
+            if isinstance(found, JSONResponse):
+                return found
+            task = hooks.with_context(task, await hooks.case_file_for(ctx, found, task))
         d = deps()
         details = await estimate_compare_details(
-            body.task, body.selections, d, attachment_ids=body.attachment_ids
+            task, body.selections, d, attachment_ids=body.attachment_ids
         )
         est = details.estimate
         warnings = tuple(w for r in est.resolved for w in r.warnings) + details.refusals
@@ -731,12 +735,23 @@ def create_app(
         )
 
     @app.post("/api/run", response_model=None)
-    async def run(body: RunRequest) -> CompareResult | JSONResponse:
+    async def run(
+        body: RunRequest, session: str | None = None, turn: str | None = None
+    ) -> CompareResult | JSONResponse:
+        task = body.task
+        case_file: str | None = None
+        hooked = session is not None or turn is not None
+        if hooked:
+            found = hooks.get_session(ctx, session)
+            if isinstance(found, JSONResponse):
+                return found
+            if (bad := hooks.check_new_turn(found, turn)) is not None:
+                return bad
+            case_file = await hooks.case_file_for(ctx, found, task)
+            task = hooks.with_context(task, case_file)
         d = deps()
         status = budget_status(
-            await estimate_compare(
-                body.task, body.selections, d, attachment_ids=body.attachment_ids
-            ),
+            await estimate_compare(task, body.selections, d, attachment_ids=body.attachment_ids),
             d,
         )
         if status.cli_calls and not body.allow_unknown_cost:
@@ -744,22 +759,167 @@ def create_app(
         if status.refused:
             raise BudgetRefusedError(status.refusal_reason or "Refused by the budget.", status)
         if status.needs_confirmation and not body.confirmed:
-            return _error(
-                409,
-                "confirmation_required",
-                f"The high estimate ({status.currency} {status.estimate_high}) exceeds the "
-                f"confirmation threshold ({status.currency} {status.confirm_above}).",
-                status,
-            )
-        return await run_compare(
-            body.task,
+            return _confirmation_error(status)
+        work = run_compare(
+            task,
             body.selections,
             d,
             allow_unknown_cost=body.allow_unknown_cost,
             attachment_ids=body.attachment_ids,
         )
+        if session is None or turn is None:
+            return await work
+        return await hooks.run_jury_turn(
+            ctx,
+            session,
+            turn,
+            task=body.task,
+            case_file=case_file,
+            selections=body.selections,
+            attachment_ids=body.attachment_ids,
+            work=work,
+        )
 
-    _add_synthesis_routes(app, deps)
+
+class _StaticFileRoute(Route):
+    """``GET /<name>`` for the files directly inside the static package directory.
+
+    Matches only names in ``files`` (read once, at app creation), so other routes
+    added later (e.g. ``/demo.css``) still match their own paths.
+    """
+
+    def __init__(self, files: Mapping[str, tuple[str, str]]) -> None:
+        self._files = dict(files)
+        super().__init__("/{name}", self._serve, methods=["GET"], include_in_schema=False)
+
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        match, child = super().matches(scope)
+        if match is Match.NONE or child.get("path_params", {}).get("name") not in self._files:
+            return Match.NONE, {}
+        return match, child
+
+    async def _serve(self, request: Request) -> Response:
+        text, media = self._files[request.path_params["name"]]
+        return Response(content=text, media_type=media)
+
+
+def _static_files() -> dict[str, tuple[str, str]]:
+    """``name -> (text, media type)`` for every servable file of the static package."""
+    static = resources.files("llm_crossjury.web").joinpath("static")
+    files: dict[str, tuple[str, str]] = {}
+    for entry in static.iterdir():
+        match = _STATIC_NAME_RE.match(entry.name)
+        if match is not None and entry.is_file():
+            files[entry.name] = (entry.read_text(encoding="utf-8"), _MEDIA_TYPES[match.group(1)])
+    return files
+
+
+def _default_sessions_root() -> Path | None:
+    try:
+        return resolve_data_paths().sessions
+    except DataDirError:
+        return None  # an unusable data dir: sessions stay in memory
+
+
+def create_app(
+    deps_factory: DepsFactory,
+    *,
+    allowed_hosts: Sequence[str] = LOOPBACK_HOSTS,
+    key_base_dir: Path | None = None,
+    key_store_path: Path | None = None,
+    ui_state_path: Path | None = None,
+    key_tester: KeyTester | None = None,
+    demo: bool = False,
+    sessions_path: Path | None = None,
+    session_store: SessionStore | None = None,
+    settings_path: Path | None = None,
+    settings_store: AppSettingsStore | None = None,
+    task_runner: TaskRunnerLike | None = None,
+    case_file_builder: CaseFileBuilder | None = None,
+    extra_routers: Sequence[RouterFactory] = (),
+) -> FastAPI:
+    """Create the compare UI app.
+
+    Args:
+        deps_factory: Builds the compare dependencies. Called once, on first use. Its
+            budget limits are replaced by ``AppSettings.budget``.
+        allowed_hosts: Accepted ``Host`` header names (without port); ``"*"`` accepts
+            any host.
+        key_base_dir: Directory holding ``.env`` and the key files, for the settings
+            page (default: the current directory).
+        key_store_path: Settings key store override (default: the user config dir).
+        ui_state_path: Onboarding state file override (default: the user config dir).
+        key_tester: Key check override for the settings page (default: a real check).
+        demo: Report demo mode in ``GET /api/providers`` (``demo: true``).
+        sessions_path: Session directory override (default: ``<data dir>/sessions``).
+        session_store: Session store override (wins over ``sessions_path``).
+        settings_path: App settings file override (default:
+            ``<config dir>/settings.json``).
+        settings_store: App settings store override (wins over ``settings_path``).
+        task_runner: Detached task runner override.
+        case_file_builder: Conversation context for a jury question asked
+            mid-session (``None`` = no case file). Can also be set later on
+            ``app.state.crossjury.case_file_builder``.
+        extra_routers: Router factories called with the :class:`AppContext` and
+            included before the static files route.
+    """
+    app = FastAPI(
+        title="llm-crossjury",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+    hosts = frozenset(h.strip("[]").lower() for h in allowed_hosts)
+    cache: list[CompareDeps] = []
+    effective: list[tuple[object, CompareDeps]] = []
+
+    settings = (
+        settings_store
+        if settings_store is not None
+        else AppSettingsStore(
+            settings_path if settings_path is not None else default_settings_path()
+        )
+    )
+    if session_store is None:
+        root = sessions_path if sessions_path is not None else _default_sessions_root()
+        session_store = SessionStore(root, persist=settings.get().save_history)
+    sessions = session_store
+    settings.subscribe(lambda s: sessions.set_persist(s.save_history))
+
+    def base_deps() -> CompareDeps:
+        if not cache:
+            built = deps_factory()
+            if isinstance(built.attachment_store, AttachmentStore):
+                built.attachment_store.set_keep(sessions.attachment_ids)
+            cache.append(built)
+        return cache[0]
+
+    def deps() -> CompareDeps:
+        base = base_deps()
+        current = settings.get()
+        if effective and effective[0][0] is current:
+            return effective[0][1]
+        budget = effective_budget(base.budget, current.budget)
+        result = base if budget == base.budget else replace(base, budget=budget)
+        effective[:] = [(current, result)]
+        return result
+
+    ctx = AppContext(
+        deps=deps,
+        sessions=sessions,
+        tasks=task_runner if task_runner is not None else TaskRunner(),
+        settings=settings,
+        allowed_hosts=tuple(allowed_hosts),
+        case_file_builder=case_file_builder,
+    )
+    app.state.crossjury = ctx
+
+    files = _static_files()
+    _add_guard(app, hosts)
+    _add_error_handlers(app)
+    _add_compare_routes(app, ctx, files, demo=demo)
+
+    _add_synthesis_routes(app, ctx)
     app.include_router(create_attachments_router(lambda: deps().attachment_store))
     app.include_router(
         create_settings_router(
@@ -768,10 +928,17 @@ def create_app(
             store_path=key_store_path,
             ui_state_path=ui_state_path,
             tester=key_tester,
+            budget_source=lambda: effective_budget(BudgetConfig(), settings.get().budget),
         )
     )
+    app.include_router(
+        create_sessions_router(store=sessions, settings=settings, allowed_hosts=allowed_hosts)
+    )
+    for factory in extra_routers:
+        app.include_router(factory(ctx))
+    app.router.routes.append(_StaticFileRoute(files))
 
     return app
 
 
-__all__ = ["LOOPBACK_HOSTS", "create_app"]
+__all__ = ["LOOPBACK_HOSTS", "STATIC_NAME_PATTERN", "AppContext", "RouterFactory", "create_app"]

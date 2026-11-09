@@ -162,9 +162,10 @@ Paused runs can be resumed from another process (§7, storage).
 ## 5. Cost behavior
 
 - **Built-in budget defaults** (overridable in config or with `--budget` for the run
-  limit): run limit **$1.00**, confirm above **$0.25**, daily limit **$5.00** (the
+  limit): run limit **$5.00**, confirm above **$1.00**, daily limit **$15.00** (the
   local calendar day, across all runs). The effective values and today's spend are
-  printed at the start of every run.
+  printed at the start of every run. In the web UI the three limits are edited on the
+  Settings page (`AppSettings.budget`, ADR 0008) and replace these defaults.
 - **Prices:** prices come only from the model registry `config/models.yaml` (ADR 0006),
   and only from verified entries (`source_url` and `last_verified` set). If an `api`
   model has no verified price, the run is **refused**. There is no override. The report shows the
@@ -276,8 +277,9 @@ Paused runs can be resumed from another process (§7, storage).
 5. **`--auto`.** *Decided:* explicit opt-in only. Auto decisions are flagged in all
    outputs (§4).
 6. **Anonymity.** *Decided:* a prompt instruction plus name scrubbing (§6; see 19).
-7. **Budget.** *Decided:* built-in defaults of $1.00 per run, confirmation above
-   $0.25, and $5.00 per day, printed at run start. A missing price entry refuses the
+7. **Budget.** *Decided:* built-in defaults of $5.00 per run, confirmation above
+   $1.00, and $15.00 per day, printed at run start (raised from $1.00 / $0.25 / $5.00
+   by ADR 0008, sized for the 32k output default; editable in the web UI's Settings). A missing price entry refuses the
    run (§5).
 8. **Grok CLI.** *Decided:* not pre-skipped. xAI's official Grok Build CLI (`grok`)
    is evaluated in phase 1B under ADR 0002.

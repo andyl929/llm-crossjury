@@ -96,3 +96,15 @@
   .wizard-progress .step-name { display: none; }
   .wizard-progress .current .step-name { display: inline; }
 }
+
+/* app settings: budget, history, memory */
+
+.section-intro { max-width: 75ch; margin: 6px 0 14px; }
+.app-form { display: flex; flex-direction: column; gap: 12px; }
+.app-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px 18px; }
+.app-fields input, .app-fields select { width: 100%; }
+.app-fields input[type="number"] { font-variant-numeric: tabular-nums; }
+.check-row { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; }
+.check-row input { width: 18px; height: 18px; margin: 0; }
+.danger-zone { border-top: 1px solid var(--rule); padding-top: 12px; }
+.actions:has(> .status:empty:only-child) { display: none; }

@@ -48,9 +48,9 @@ agreement:                    # shown at checkpoint A; never skips review by its
   threshold: null             # recommend skipping review at/above this ratio (TBD by evaluation)
 
 budget:                       # printed at the start of every run
-  run_limit: "1.00"
-  confirm_above: "0.25"
-  daily_limit: "5.00"
+  run_limit: "5.00"
+  confirm_above: "1.00"
+  daily_limit: "15.00"
   currency: USD
   allow_unknown_cost: false   # must be true to use any cli-backend member
 

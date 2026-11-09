@@ -1,4 +1,5 @@
-// llm-crossjury settings page: API keys and the first-run onboarding wizard.
+// llm-crossjury settings page: API keys, the first-run onboarding wizard, and the app
+// settings (budget, history, memory).
 // Vanilla JS, no build step. Server text is inserted with textContent only.
 // A key typed by the user lives only in a password input until it is sent; it is
 // never written into the page, the console or storage.
@@ -15,6 +16,10 @@
     step: 1,
     wizardProvider: null,
     busy: false,
+    app: null,
+    providers: null,
+    budgetInfo: null,
+    memoryOptions: [],
   };
   const STEPS = ["Keys or subscriptions", "Get a key", "Paste", "Test", "Limits", "Done"];
 
@@ -355,11 +360,203 @@
     });
   }
 
+  // ------------------------------------------------------------------ app settings
+  // Budget, History and Memory: GET/PUT /api/settings/app. Each section saves the whole
+  // settings object with only its own fields changed.
+
+  const MONEY_RE = /^\d{1,7}(\.\d{1,2})?$/;
+
+  function money(value, currency) {
+    return (currency === "USD" ? "$" : currency + " ") + Number(value).toFixed(2);
+  }
+
+  async function saveAppSettings(changes, status, button) {
+    if (button) button.disabled = true;
+    setStatus(status, "Saving\u2026", "muted");
+    try {
+      const next = Object.assign({}, state.app.settings, changes);
+      const data = await api("PUT", "/api/settings/app", next);
+      state.app.settings = data.settings;
+      renderAppSettings();
+      setStatus(status, "Saved.", "result-valid");
+      return true;
+    } catch (err) {
+      setStatus(status, err.message, "result-error");
+      return false;
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  function renderBudget() {
+    const b = state.app.settings.budget;
+    const d = state.app.defaults.budget;
+    const currency = state.budgetInfo ? state.budgetInfo.currency : "USD";
+    $("budget-currency").textContent = currency;
+    $("budget-run").value = Number(b.run_limit).toFixed(2);
+    $("budget-daily").value = Number(b.daily_limit).toFixed(2);
+    $("budget-confirm").value = Number(b.confirm_above).toFixed(2);
+    $("budget-defaults").textContent = "Defaults: " + money(d.run_limit, currency) + " per run, "
+      + money(d.daily_limit, currency) + " per day, ask above " + money(d.confirm_above, currency) + ".";
+    const info = state.budgetInfo;
+    $("budget-spent").textContent = info
+      ? "Spent today: " + money(info.spent_today, currency) + "."
+      : "";
+  }
+
+  function readBudget(status) {
+    const fields = [["budget-run", "run_limit", "The limit per run"],
+      ["budget-daily", "daily_limit", "The daily limit"],
+      ["budget-confirm", "confirm_above", "The confirmation amount"]];
+    const budget = {};
+    for (const [id, key, label] of fields) {
+      const text = $(id).value.trim();
+      if (!MONEY_RE.test(text) || (key !== "confirm_above" && Number(text) <= 0)) {
+        setStatus(status, label + " must be an amount like 5.00"
+          + (key !== "confirm_above" ? ", above zero." : "."), "result-error");
+        $(id).focus();
+        return null;
+      }
+      budget[key] = text;
+    }
+    return budget;
+  }
+
+  function renderHistory() {
+    $("history-save").checked = state.app.settings.save_history === true;
+  }
+
+  function modelKey(ref) {
+    return ref ? ref.provider + "/" + ref.backend + "/" + ref.model : "auto";
+  }
+
+  function memoryModelOptions() {
+    const options = [];
+    for (const p of (state.providers || [])) {
+      for (const m of p.models || []) {
+        options.push({ ref: { provider: p.name, backend: "api", model: m.id }, label: p.label + ": " + m.label + " (API)" });
+      }
+      if (p.cli && p.cli.available) {
+        for (const m of p.cli.models || []) {
+          options.push({ ref: { provider: p.name, backend: "cli", model: m.id }, label: p.label + ": " + m.label + " (" + p.cli.product + ")" });
+        }
+      }
+    }
+    return options;
+  }
+
+  function renderMemory() {
+    const current = state.app.settings.memory_model;
+    const select = $("memory-model");
+    const options = memoryModelOptions();
+    state.memoryOptions = options;
+    const nodes = [el("option", { value: "auto", text: "Automatic" })];
+    options.forEach((o, i) => nodes.push(el("option", { value: String(i), text: o.label })));
+    let selected = "auto";
+    if (current) {
+      const index = options.findIndex((o) => modelKey(o.ref) === modelKey(current));
+      if (index >= 0) {
+        selected = String(index);
+      } else {
+        // Saved model not offered right now (no key, CLI not signed in): keep it visible.
+        state.memoryOptions.push({ ref: current, label: modelKey(current) + " (not available now)" });
+        selected = String(state.memoryOptions.length - 1);
+        nodes.push(el("option", { value: selected, text: state.memoryOptions[state.memoryOptions.length - 1].label }));
+      }
+    }
+    select.replaceChildren(...nodes);
+    select.value = selected;
+    $("memory-budget").value = String(state.app.settings.context_budget_tokens);
+  }
+
+  function renderAppSettings() {
+    renderBudget();
+    renderHistory();
+    renderMemory();
+  }
+
+  async function loadProvidersInfo() {
+    try {
+      const data = await api("GET", "/api/providers");
+      state.providers = data.providers;
+      state.budgetInfo = data.budget;
+      if (state.app) { renderBudget(); renderMemory(); }
+    } catch (_) {
+      // Optional: without it the page shows no spend and only "Automatic".
+    }
+  }
+
+  function initAppSettings() {
+    $("budget-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = $("budget-status");
+      const budget = readBudget(status);
+      if (!budget) return;
+      if (await saveAppSettings({ budget: budget }, status, $("budget-save"))) loadProvidersInfo();
+    });
+    $("budget-reset").addEventListener("click", async () => {
+      const status = $("budget-status");
+      if (await saveAppSettings({ budget: state.app.defaults.budget }, status, $("budget-reset"))) loadProvidersInfo();
+    });
+    $("history-save").addEventListener("change", async (event) => {
+      const box = event.target;
+      const wanted = box.checked;
+      if (!wanted && !window.confirm("Stop saving conversations? New ones will be lost when the server stops. Saved ones are kept.")) {
+        box.checked = true;
+        return;
+      }
+      box.disabled = true;
+      await saveAppSettings({ save_history: wanted }, $("history-status"), null);
+      renderHistory();
+      box.disabled = false;
+    });
+    $("history-clear").addEventListener("click", async () => {
+      const status = $("history-clear-status");
+      if (!window.confirm("Delete all conversations? This cannot be undone.")) return;
+      $("history-clear").disabled = true;
+      try {
+        const data = await api("DELETE", "/api/sessions");
+        const n = Number(data.deleted) || 0;
+        setStatus(status, n === 1 ? "Deleted 1 conversation." : "Deleted " + n + " conversations.", "result-valid");
+      } catch (err) {
+        setStatus(status, err.message, "result-error");
+      } finally {
+        $("history-clear").disabled = false;
+      }
+    });
+    $("memory-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = $("memory-status");
+      const text = $("memory-budget").value.trim();
+      const tokens = Number(text);
+      if (!/^\d+$/.test(text) || tokens < 8000) {
+        setStatus(status, "The context budget must be a whole number of at least 8000.", "result-error");
+        $("memory-budget").focus();
+        return;
+      }
+      const choice = $("memory-model").value;
+      const option = choice === "auto" ? null : state.memoryOptions[Number(choice)];
+      await saveAppSettings({
+        memory_model: option ? option.ref : null,
+        context_budget_tokens: tokens,
+      }, status, $("memory-save"));
+    });
+  }
+
+  async function loadAppSettings() {
+    state.app = await api("GET", "/api/settings/app");
+    renderAppSettings();
+    initAppSettings();
+  }
+
   // ------------------------------------------------------------------ start
 
   async function start() {
+    loadProvidersInfo();
     try {
-      const [, onboarding] = await Promise.all([loadKeys(), api("GET", "/api/onboarding")]);
+      const [, onboarding] = await Promise.all([
+        loadKeys(), api("GET", "/api/onboarding"), loadAppSettings(),
+      ]);
       state.onboarding = onboarding;
       if (wizardRequested()) initWizard();
     } catch (err) {

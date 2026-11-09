@@ -337,7 +337,7 @@ def test_budget_refusal_before_any_call(stages: FakeStages) -> None:
 
 
 def test_budget_refusal_counts_daily_remaining(stages: FakeStages) -> None:
-    ledger = FakeLedger(spent_today=Decimal("4.995"))
+    ledger = FakeLedger(spent_today=Decimal("14.995"))
     with pytest.raises(BudgetRefusedError):
         asyncio.run(
             run_finish_step(FinishRequest(task=TASK, answers=ANSWERS, seed=1), _deps(ledger=ledger))

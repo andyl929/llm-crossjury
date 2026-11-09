@@ -21,6 +21,7 @@ from tests.unit._compare_fakes import (
     echo_provider,
     make_deps,
     raising_provider,
+    settings_for,
 )
 
 KEY_ENVS = {
@@ -34,7 +35,10 @@ TASK = "Explain <b>bold</b> & {braces}."
 
 
 def _client(deps: CompareDeps) -> TestClient:
-    return TestClient(create_app(lambda: deps), base_url="http://127.0.0.1")
+    return TestClient(
+        create_app(lambda: deps, settings_store=settings_for(deps.budget)),
+        base_url="http://127.0.0.1",
+    )
 
 
 def _body(*providers: str, model: str = "balanced", **extra: Any) -> dict[str, Any]:
@@ -148,11 +152,11 @@ def test_providers_list_usable_models_and_budget() -> None:
     assert data["default_max_output_tokens"] == 32_000
     assert data["budget"] == {
         "currency": "USD",
-        "run_limit": "1.00",
-        "confirm_above": "0.25",
-        "daily_limit": "5.00",
+        "run_limit": "5.00",
+        "confirm_above": "1.00",
+        "daily_limit": "15.00",
         "spent_today": "0",
-        "daily_remaining": "5.00",
+        "daily_remaining": "15.00",
     }
 
 
@@ -182,7 +186,7 @@ def test_estimate_returns_range_and_budget() -> None:
     assert [line["provider"] for line in data["lines"]] == ["openai", "gemini"]
     assert data["budget"]["needs_confirmation"] is False
     assert data["budget"]["refused"] is False
-    assert data["budget"]["daily_remaining"] == "5.00"
+    assert data["budget"]["daily_remaining"] == "15.00"
 
 
 def test_estimate_flags_confirmation_and_refusal() -> None:
@@ -260,7 +264,7 @@ def test_run_missing_key_is_a_member_error() -> None:
 
 def test_run_budget_refusal_is_4xx_and_calls_nothing() -> None:
     providers = {p: echo_provider(p) for p in PROVIDERS}
-    deps = make_deps(providers=providers, ledger=FakeLedger(spent_today=Decimal("4.99")))
+    deps = make_deps(providers=providers, ledger=FakeLedger(spent_today=Decimal("14.99")))
     response = _client(deps).post("/api/run", json=_body("openai"))
     assert response.status_code == 409
     data = response.json()

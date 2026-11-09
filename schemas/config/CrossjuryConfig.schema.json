@@ -60,7 +60,7 @@
     },
     "BudgetConfig": {
       "additionalProperties": false,
-      "description": "Spending limits. Defaults are deliberately small and always printed.",
+      "description": "Spending limits. Defaults are general purpose and always printed (ADR 0003, 0008).\n\nThe web UI replaces the three limits with ``AppSettings.budget`` (Settings page).",
       "properties": {
         "run_limit": {
           "anyOf": [
@@ -71,7 +71,7 @@
               "type": "string"
             }
           ],
-          "default": "1.00",
+          "default": "5.00",
           "title": "Run Limit"
         },
         "confirm_above": {
@@ -83,7 +83,7 @@
               "type": "string"
             }
           ],
-          "default": "0.25",
+          "default": "1.00",
           "title": "Confirm Above"
         },
         "daily_limit": {
@@ -95,7 +95,7 @@
               "type": "string"
             }
           ],
-          "default": "5.00",
+          "default": "15.00",
           "title": "Daily Limit"
         },
         "currency": {
@@ -401,9 +401,9 @@
     "budget": {
       "$ref": "#/$defs/BudgetConfig",
       "default": {
-        "run_limit": "1.00",
-        "confirm_above": "0.25",
-        "daily_limit": "5.00",
+        "run_limit": "5.00",
+        "confirm_above": "1.00",
+        "daily_limit": "15.00",
         "currency": "USD",
         "allow_unknown_cost": false
       }

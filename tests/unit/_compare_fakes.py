@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+from llm_crossjury.core.app_settings import AppSettingsStore
 from llm_crossjury.core.compare_service import CompareDeps
 from llm_crossjury.core.config import BudgetConfig
 from llm_crossjury.core.cost.estimate import CallPlan, CostEstimate, EstimateLine
@@ -35,6 +36,7 @@ from llm_crossjury.core.registry.schema import (
     ReasoningControl,
     ReasoningControlType,
 )
+from llm_crossjury.core.sessions.interfaces import AppSettings, BudgetSettings
 
 PROVIDERS = ("anthropic", "openai", "gemini", "xai")
 CLI_PROVIDERS = ("anthropic", "openai", "xai")
@@ -355,4 +357,19 @@ def make_deps(
         ledger=ledger if ledger is not None else FakeLedger(),
         budget=budget or BudgetConfig(),
         compute_cost=compute_cost,
+    )
+
+
+def settings_for(budget: BudgetConfig) -> AppSettingsStore:
+    """In-memory app settings whose budget equals ``budget`` (the web app's budget
+    comes from ``AppSettings``, not from the deps)."""
+    return AppSettingsStore(
+        None,
+        defaults=AppSettings(
+            budget=BudgetSettings(
+                run_limit=budget.run_limit,
+                confirm_above=budget.confirm_above,
+                daily_limit=budget.daily_limit,
+            )
+        ),
     )

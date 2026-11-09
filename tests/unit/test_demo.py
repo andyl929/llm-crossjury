@@ -342,3 +342,30 @@ def test_ui_demo_serves_the_demo_app(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_ui_help_lists_demo() -> None:
     result = CliRunner().invoke(cli_module.app, ["ui", "--help"])
     assert "--demo" in re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+
+
+def test_demo_sessions_and_settings_stay_in_the_demo_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_data = tmp_path / "real-data"
+    real_config = tmp_path / "real-config"
+    monkeypatch.setenv("LLM_CROSSJURY_DATA_DIR", str(real_data))
+    monkeypatch.setenv("LLM_CROSSJURY_CONFIG_DIR", str(real_config))
+    demo_dir = tmp_path / "demo"
+    demo_dir.mkdir()
+    client = _client(demo_dir)
+    session_id = client.post("/api/sessions", json={}).json()["id"]
+    turn = "0" * 32
+    response = client.post(
+        f"/api/run?session={session_id}&turn={turn}",
+        json={"task": DEMO_QUESTION, "selections": _selections("openai")},
+    )
+    assert response.status_code == 200, response.text
+    assert client.get(f"/api/sessions/{session_id}").json()["turns"][0]["status"] == "done"
+    settings = client.get("/api/settings/app").json()["settings"]
+    assert Decimal(settings["budget"]["confirm_above"]) == Decimal("100")  # demo budget
+    client.put("/api/settings/app", json={**settings, "save_history": True})
+    assert (demo_dir / "sessions" / f"{session_id}.json").is_file()
+    assert (demo_dir / "config" / "settings.json").is_file()
+    assert not real_data.exists()
+    assert not real_config.exists()
