@@ -95,7 +95,7 @@ def test_theme_script_and_icon_are_served_locally() -> None:
     assert icon.status_code == 200
     assert icon.headers["content-type"].startswith("image/svg+xml")
     assert "<script" not in icon.text
-    for page in ("/",):
+    for page in ("/", "/settings"):
         html = client.get(page).text
         assert '<script src="/theme.js"></script>' in html
         assert 'href="/favicon.svg"' in html
