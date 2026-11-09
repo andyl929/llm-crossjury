@@ -43,7 +43,9 @@ from llm_crossjury.core.attachments.build import BuiltAttachment
 from llm_crossjury.core.attachments.prompt import (
     AttachmentReceipt,
     DeliveryMode,
+    add_derived_images,
     attachment_tokens,
+    derived_map,
     inline_attachments,
     receipts,
     refusal_message,
@@ -69,6 +71,7 @@ from llm_crossjury.core.cost.pricing import PricingError, PricingTable
 from llm_crossjury.core.keys import load_all_keys
 from llm_crossjury.core.orchestrator.stage import StageName
 from llm_crossjury.core.providers.base import (
+    AttachmentKind,
     Backend,
     CompletionRequest,
     CompletionResult,
@@ -191,7 +194,8 @@ class MemberResult(_Frozen):
     currency: str
     latency_s: float | None
     attachments: tuple[AttachmentReceipt, ...] = ()
-    """How this member received each attached file (native, text or refused)."""
+    """How this member received each attached file (native, text, text+images or
+    refused)."""
 
 
 class AttachmentEstimateLine(_Frozen):
@@ -202,9 +206,13 @@ class AttachmentEstimateLine(_Frozen):
     model: str
     id: str
     filename: str
+    kind: AttachmentKind
     mode: DeliveryMode
+    images: int = 0
+    """Derived images sent with the text (``text+images``); included in ``tokens``."""
     tokens: int | None
-    """Local estimate (``estimate_attachment_tokens``); ``None`` when refused."""
+    """Local estimate (``estimate_attachment_tokens``, plus the derived images as
+    native images); ``None`` when refused."""
     vendor_counted: bool
     """The member's input total came from the vendor's token counter (which already
     includes the attachments); ``tokens`` is then shown for information only."""
@@ -827,15 +835,24 @@ def _member_prompt(  # noqa: PLR0917 - private helper of prepare_calls
         if refused
         else None
     )
+    derived = derived_map(built)
     if sel.backend is not Backend.CLI:
-        return shared_prompt, member_receipts, tokens_by_id, refusal
+        # Smart page images: a member that reads images but not a file's kind gets
+        # the file's derived images next to its text (unchanged prompt otherwise).
+        prompt = add_derived_images(shared_prompt, derived, caps.input_modalities)
+        return prompt, member_receipts, tokens_by_id, refusal
     # cli adapters read only the attachments their capabilities declare: keep those,
     # inline the rest as text (refused files are left out; a refused member is never
     # called anyway).
     kept = {r.id for r in member_receipts if r.mode != "refused"}
     usable = [b.attachment for b in built if b.attachment.sha256 in kept]
     prompt = (
-        inline_attachments(with_attachments(base_prompt, usable), caps.input_modalities)
+        inline_attachments(
+            add_derived_images(
+                with_attachments(base_prompt, usable), derived, caps.input_modalities
+            ),
+            caps.input_modalities,
+        )
         if usable
         else base_prompt
     )
@@ -937,7 +954,9 @@ def _details(prepared: Sequence[PreparedCall], deps: CompareDeps) -> CompareEsti
                     model=call.resolved.model_id,
                     id=receipt.id,
                     filename=receipt.filename,
+                    kind=receipt.kind,
                     mode=receipt.mode,
+                    images=receipt.images,
                     tokens=tokens.get(receipt.id),
                     vendor_counted=call.vendor_counted,
                 )

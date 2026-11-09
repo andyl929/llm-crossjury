@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 
-from llm_crossjury.core.attachments.build import AttachmentMeta, BuiltAttachment
+from llm_crossjury.core.attachments.build import AttachmentMeta, BuiltAttachment, DerivedImageMeta
 from llm_crossjury.core.attachments.store import AttachmentNotFoundError
 from llm_crossjury.core.providers.base import Attachment, AttachmentKind, Capabilities
 
@@ -48,6 +48,42 @@ def built(
         text_tokens=None if fallback is None else 10,
     )
     return BuiltAttachment(attachment=attachment, meta=meta)
+
+
+def with_images(item: BuiltAttachment, count: int, *, size: int = 100) -> BuiltAttachment:
+    """``item`` with ``count`` derived images of ``size`` bytes (PDF pages or DOCX images)."""
+    pdf = item.attachment.kind is AttachmentKind.PDF
+    images: list[Attachment] = []
+    metas: list[DerivedImageMeta] = []
+    for number in range(1, count + 1):
+        data = f"{item.attachment.sha256}:{number}:".encode().ljust(size, b".")
+        name = f"{item.attachment.filename}#{'page' if pdf else 'image'}-{number}.png"
+        digest = hashlib.sha256(data).hexdigest()
+        images.append(
+            Attachment(
+                kind=AttachmentKind.IMAGE,
+                media_type="image/png",
+                filename=name,
+                sha256=digest,
+                data=data,
+                fallback_text=None,
+            )
+        )
+        metas.append(
+            DerivedImageMeta(
+                filename=name,
+                media_type="image/png",
+                sha256=digest,
+                size=size,
+                width=990,
+                height=1280,
+                reason="figure" if pdf else "embedded",
+                page=number if pdf else None,
+                index=None if pdf else number,
+            )
+        )
+    meta = item.meta.model_copy(update={"derived": tuple(metas)})
+    return BuiltAttachment(attachment=item.attachment, meta=meta, derived_images=tuple(images))
 
 
 @dataclass
