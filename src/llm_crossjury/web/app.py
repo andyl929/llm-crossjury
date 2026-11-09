@@ -87,7 +87,7 @@ from llm_crossjury.core.synthesis_service import (
     run_resynthesis,
 )
 from llm_crossjury.web.attachments_api import UPLOAD_PATH, create_attachments_router
-from llm_crossjury.web.settings_api import create_settings_router
+from llm_crossjury.web.settings_api import KeyTester, create_settings_router
 
 LOOPBACK_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
 """Default ``Host`` header values the app accepts."""
@@ -259,6 +259,8 @@ class ProvidersResponse(_Frozen):
     budget: BudgetInfo
     consent_text: str
     """The consent statement the UI shows next to the checkbox for CLI members."""
+    demo: bool = False
+    """The app runs in demo mode: simulated models, canned answers, no keys, no cost."""
 
 
 class CompareRequest(_Frozen):
@@ -588,6 +590,10 @@ def create_app(
     *,
     allowed_hosts: Sequence[str] = LOOPBACK_HOSTS,
     key_base_dir: Path | None = None,
+    key_store_path: Path | None = None,
+    ui_state_path: Path | None = None,
+    key_tester: KeyTester | None = None,
+    demo: bool = False,
 ) -> FastAPI:
     """Create the compare UI app.
 
@@ -597,6 +603,10 @@ def create_app(
             any host.
         key_base_dir: Directory holding ``.env`` and the key files, for the settings
             page (default: the current directory).
+        key_store_path: Settings key store override (default: the user config dir).
+        ui_state_path: Onboarding state file override (default: the user config dir).
+        key_tester: Key check override for the settings page (default: a real check).
+        demo: Report demo mode in ``GET /api/providers`` (``demo: true``).
     """
     app = FastAPI(
         title="llm-crossjury",
@@ -674,6 +684,7 @@ def create_app(
             default_max_output_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
             budget=_budget_info(d),
             consent_text=CONSENT_TEXT,
+            demo=demo,
         )
 
     @app.post("/api/estimate")
@@ -742,6 +753,9 @@ def create_app(
         create_settings_router(
             base_dir=key_base_dir if key_base_dir is not None else Path.cwd(),
             allowed_hosts=allowed_hosts,
+            store_path=key_store_path,
+            ui_state_path=ui_state_path,
+            tester=key_tester,
         )
     )
 
