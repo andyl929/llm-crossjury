@@ -2,15 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
   <meta name="color-scheme" content="light dark">
   <title>llm-crossjury</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/app.css">
   <script src="/theme.js"></script>
 </head>
-<body class="has-strip">
+<body class="app-home thread-empty mode-jury">
   <a class="skip-link" href="#main">Skip to main content</a>
+  <a class="skip-link" href="#task">Skip to the message box</a>
 
   <svg class="sprite" aria-hidden="true" focusable="false">
     <symbol id="i-mark" viewBox="0 0 24 24"><path d="M4 3v7M9.33 3v7M14.67 3v7M20 3v7M4 10l8 6.5 8-6.5M12 16.5V21"/></symbol>
@@ -32,9 +33,18 @@
     <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h12l-2.5 4 2.5 4H5"/></symbol>
     <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 10A8 8 0 0 0 5.2 7.3L4 9M4 4.5V9h4.5M4.5 14a8 8 0 0 0 14.3 2.7L20 15M20 19.5V15h-4.5"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2.5-6.5z"/><path d="M11.5 13.5L20 4"/></symbol>
   </svg>
 
   <header class="topbar">
+    <button id="sidebar-toggle" class="icon-btn sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="Hide conversations">
+      <svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg>
+    </button>
     <a class="brand" href="/">
       <svg class="icon brand-mark" aria-hidden="true"><use href="#i-mark"/></svg>
       <span class="brand-name">llm-crossjury</span>
@@ -49,148 +59,125 @@
     </button>
   </header>
 
-  <main id="main" class="page" tabindex="-1">
-    <h1 class="visually-hidden">Compare AI answers</h1>
-
-    <div class="bench">
-      <section id="task-panel" class="panel task-panel" aria-labelledby="task-heading">
-        <div class="panel-head">
-          <h2 id="task-heading" class="panel-title"><span class="step">Step 1</span> <label for="task">Question</label></h2>
-        </div>
-        <textarea id="task" rows="8" spellcheck="true" aria-describedby="task-help"
-          placeholder="Ask a question or describe a task. Every selected model answers it on its own."></textarea>
-        <p id="task-help" class="help">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to estimate the cost, then again to ask the models.</p>
-        <div class="attach-bar">
-          <button id="attach-btn" type="button" class="btn">
-            <svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg>Attach files
-          </button>
-          <input id="attach-input" type="file" multiple hidden
-            accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif">
-          <span id="attach-hint" class="help">PDF, Word or images, up to 20 MB in total. Drop files here or paste a screenshot.</span>
-        </div>
-        <ul id="attach-list" class="attach-list" hidden></ul>
-        <p id="attach-privacy" class="note" hidden></p>
-      </section>
-
-      <section class="panel models-panel actions-panel" aria-labelledby="models-heading">
-        <div class="panel-head">
-          <h2 id="models-heading" class="panel-title">Models</h2>
-          <span id="models-count" class="panel-aside" aria-live="polite"></span>
-        </div>
-        <div id="providers" class="rack">
-          <p class="help rack-loading">Loading models&hellip;</p>
-        </div>
-        <div id="estimate" class="estimate" hidden></div>
-        <label id="consent-box" class="consent" hidden>
-          <input type="checkbox" id="consent">
-          <span id="consent-text">I understand: cost is unknown, calls count against my plan's usage limits, and this mode is experimental</span>
-        </label>
-      </section>
-    </div>
-
-    <div id="message" class="message" role="alert" hidden></div>
-
-    <section id="answers-section" class="answers-section" aria-labelledby="answers-heading">
-      <div class="section-head">
-        <h2 id="answers-heading" class="section-title">Answers</h2>
-        <div id="answers-tools" class="toolbar" hidden>
-          <label class="switch">
-            <input id="sync-scroll" type="checkbox">
-            <span>Scroll together</span>
-          </label>
-          <button id="export-btn" type="button" class="btn">
-            <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export Markdown
-          </button>
-        </div>
+  <div class="shell">
+    <aside id="sidebar" class="sidebar" aria-labelledby="history-heading">
+      <div class="sidebar-head">
+        <button id="new-chat" type="button" class="btn btn-new">
+          <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New conversation
+        </button>
       </div>
-      <div id="answers-empty" class="empty">
-        <ol class="empty-steps">
-          <li><strong>Ask.</strong> Write a question and attach any files it needs.</li>
-          <li><strong>Compare.</strong> Pick up to four models. Each answers on its own, and the answers appear here side by side.</li>
-          <li><strong>Synthesize.</strong> The models review each other anonymously, and a chair model writes one final answer with the points still in dispute.</li>
-        </ol>
-        <p class="help">Every step shows its cost before it runs. Subscription models show plan usage instead of dollars.</p>
-      </div>
-      <div id="results-section" hidden>
-        <div id="run-total" class="run-total"></div>
-        <div id="results" class="answers"></div>
-      </div>
-    </section>
+      <h2 id="history-heading" class="sidebar-title">History</h2>
+      <ul id="history" class="history"></ul>
+      <p id="history-note" class="help history-note" hidden></p>
+    </aside>
+    <div id="sidebar-overlay" class="overlay" hidden></div>
 
-    <section id="synthesis-section" class="panel synthesis" aria-labelledby="synthesis-heading" hidden>
-      <div class="panel-head synth-head">
-        <h2 id="synthesis-heading" class="panel-title"><span class="step">Step 2</span> Synthesis</h2>
-        <p class="help">Measure agreement, let the models review each other anonymously, and have a chair model write one final answer.</p>
-      </div>
-      <p id="syn-unavailable" class="empty-inline" hidden></p>
-      <div id="syn-form" class="synth-form">
-        <p id="syn-attach-note" class="note" hidden></p>
-        <div class="synth-fields">
-          <div class="field field-wide">
-            <label for="syn-instructions" class="field-label">Extra instructions <span class="optional">optional</span></label>
-            <textarea id="syn-instructions" rows="3" spellcheck="true"
-              placeholder="Comparison criteria, or a follow-up question for the reviewers and the chair."></textarea>
+    <div id="workspace" class="workspace">
+      <main id="main" class="thread-scroll" tabindex="-1">
+        <h1 class="visually-hidden">Compare AI answers</h1>
+        <div class="thread-wrap">
+          <div id="thread-head" class="thread-head" hidden>
+            <h2 id="thread-title" class="thread-title"></h2>
+            <button id="export-btn" type="button" class="btn btn-small">
+              <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export Markdown
+            </button>
           </div>
-          <div class="field">
-            <label for="syn-chair" class="field-label">Chair model</label>
-            <select id="syn-chair"></select>
-          </div>
-          <fieldset class="field tier">
-            <legend class="field-label">Review tier</legend>
-            <label class="radio"><input type="radio" name="syn-tier" value="economy" checked> Economy <span class="help">fast models</span></label>
-            <label class="radio"><input type="radio" name="syn-tier" value="standard"> Standard <span class="help">the models above</span></label>
-          </fieldset>
-        </div>
-        <label id="syn-consent-box" class="consent" hidden>
-          <input type="checkbox" id="syn-consent">
-          <span id="syn-consent-text">I understand: cost is unknown, calls count against my plan's usage limits, and this mode is experimental</span>
-        </label>
-        <div class="actions">
-          <button id="syn-btn" type="button" class="btn btn-primary" disabled>AI synthesize</button>
-          <span id="syn-status" class="status" aria-live="polite"></span>
-        </div>
-        <details id="syn-breakdown" class="breakdown" hidden>
-          <summary>Cost breakdown</summary>
-          <div id="syn-breakdown-body"></div>
-        </details>
-      </div>
-      <ol id="syn-progress" class="stepper" aria-label="Synthesis progress" hidden></ol>
-      <div id="syn-message" class="message" role="alert" hidden></div>
-      <div id="syn-decision" class="decision" hidden></div>
-      <div id="syn-result" class="synth-result" hidden></div>
-    </section>
-  </main>
 
-  <footer class="strip" aria-label="Cost and run controls">
-    <div class="strip-inner">
-      <dl class="readouts">
-        <div class="readout" id="strip-estimate">
-          <dt>Estimate</dt>
-          <dd><span class="readout-value">&ndash;</span><span class="readout-sub">Not estimated</span></dd>
+          <div id="answers-empty" class="empty">
+            <ol class="empty-steps">
+              <li><strong>Ask.</strong> Write a question below and attach any files it needs.</li>
+              <li><strong>Compare.</strong> Pick up to four models. Each answers on its own, and the answers appear here side by side.</li>
+              <li><strong>Synthesize, then keep talking.</strong> A chair model writes one final answer with the points still in dispute. Continue with any model, or ask the jury again.</li>
+            </ol>
+            <p class="help">Every step shows its cost before it runs. Subscription models show plan usage instead of dollars.</p>
+          </div>
+
+          <div id="thread" class="thread"></div>
+
+          <section id="jury-panel" class="panel models-panel jury-panel" aria-labelledby="models-heading">
+            <div class="panel-head">
+              <h2 id="models-heading" class="panel-title"><span class="step">Jury</span> Models</h2>
+              <span id="models-count" class="panel-aside" aria-live="polite"></span>
+              <button id="jury-close" type="button" class="btn btn-small btn-link jury-close" hidden>
+                <svg class="icon" aria-hidden="true"><use href="#i-chat"/></svg>Chat with one model instead
+              </button>
+            </div>
+            <div id="providers" class="rack">
+              <p class="help rack-loading">Loading models&hellip;</p>
+            </div>
+            <div id="estimate" class="estimate" hidden></div>
+            <label id="consent-box" class="consent" hidden>
+              <input type="checkbox" id="consent">
+              <span id="consent-text">I understand: cost is unknown, calls count against my plan's usage limits, and this mode is experimental</span>
+            </label>
+          </section>
         </div>
-        <div class="readout readout-secondary" id="strip-last">
-          <dt>Last cost</dt>
-          <dd><span class="readout-value">&ndash;</span><span class="readout-sub">Nothing run yet</span></dd>
+      </main>
+
+      <div class="dock">
+        <div class="dock-inner">
+          <div id="message" class="message" role="alert" hidden></div>
+          <section id="composer" class="composer" aria-label="Message">
+            <div id="continue-chip" class="chip-row" hidden></div>
+            <label for="task" class="visually-hidden">Message</label>
+            <textarea id="task" rows="2" spellcheck="true" aria-describedby="action-hint"
+              placeholder="Ask a question or describe a task. Every selected model answers it on its own."></textarea>
+            <ul id="attach-list" class="attach-list" hidden></ul>
+            <p id="attach-privacy" class="note" hidden></p>
+            <div class="composer-bar">
+              <button id="attach-btn" type="button" class="icon-btn" aria-label="Attach files: PDF, Word or images, up to 20 MB. You can also drop or paste them." title="Attach files: PDF, Word or images, up to 20 MB. Drop or paste them too.">
+                <svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg>
+              </button>
+              <input id="attach-input" type="file" multiple hidden
+                accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif">
+              <div id="chat-controls" class="chat-controls" hidden>
+                <label for="chat-model" class="visually-hidden">Model for this message</label>
+                <select id="chat-model"></select>
+              </div>
+              <span class="composer-spacer"></span>
+              <button id="jury-btn" type="button" class="btn" hidden>
+                <svg class="icon" aria-hidden="true"><use href="#i-mark"/></svg>Ask the jury
+              </button>
+              <button id="send-btn" type="button" class="btn btn-primary btn-send" hidden disabled>
+                <svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Send
+              </button>
+              <button id="estimate-btn" type="button" class="btn">Estimate cost</button>
+              <button id="run-btn" type="button" class="btn btn-primary btn-run" disabled aria-keyshortcuts="Control+Enter Meta+Enter">Ask models</button>
+            </div>
+          </section>
+          <div class="composer-status">
+            <div id="context-meter" class="context-meter" hidden></div>
+            <dl class="readouts">
+              <div class="readout" id="strip-estimate">
+                <dt>Estimate</dt>
+                <dd><span class="readout-value">&ndash;</span><span class="readout-sub">Not estimated</span></dd>
+              </div>
+              <div class="readout readout-secondary" id="strip-last">
+                <dt>Last cost</dt>
+                <dd><span class="readout-value">&ndash;</span><span class="readout-sub">Nothing run yet</span></dd>
+              </div>
+              <div class="readout" id="strip-today">
+                <dt>Today</dt>
+                <dd><span class="gauge" aria-hidden="true"></span><span class="readout-value">&ndash;</span><span class="readout-sub"></span></dd>
+              </div>
+              <div class="readout readout-secondary" id="strip-plan" hidden>
+                <dt>Plan calls</dt>
+                <dd><span class="readout-value">0</span><span class="readout-sub">this session</span></dd>
+              </div>
+            </dl>
+            <span id="action-hint" class="strip-hint" aria-live="polite">Pick at least one model, then estimate the cost.</span>
+          </div>
         </div>
-        <div class="readout readout-secondary" id="strip-today">
-          <dt>Today</dt>
-          <dd><span class="gauge" aria-hidden="true"></span><span class="readout-value">&ndash;</span><span class="readout-sub"></span></dd>
-        </div>
-        <div class="readout readout-secondary" id="strip-plan" hidden>
-          <dt>Plan calls</dt>
-          <dd><span class="readout-value">0</span><span class="readout-sub">this session</span></dd>
-        </div>
-      </dl>
-      <div class="strip-actions">
-        <span id="action-hint" class="strip-hint" aria-live="polite">Pick at least one model, then estimate the cost.</span>
-        <button id="estimate-btn" type="button" class="btn btn-strip">Estimate cost</button>
-        <button id="run-btn" type="button" class="btn btn-primary btn-run" disabled aria-keyshortcuts="Control+Enter Meta+Enter">Ask models</button>
       </div>
     </div>
-  </footer>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="/app.js"></script>
+  <script src="/sessions.js"></script>
+  <script src="/jury.js"></script>
+  <script src="/chat.js"></script>
+  <script src="/composer.js"></script>
 </body>
 </html>

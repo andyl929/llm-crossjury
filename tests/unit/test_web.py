@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
+from importlib import resources
 from typing import Any, ClassVar
 
 import pytest
@@ -99,6 +100,19 @@ def test_theme_script_and_icon_are_served_locally() -> None:
         html = client.get(page).text
         assert '<script src="/theme.js"></script>' in html
         assert 'href="/favicon.svg"' in html
+
+
+def test_every_home_page_script_follows_the_static_rules() -> None:
+    page = _client(make_deps()).get("/").text
+    names = re.findall(r'<script src="/([\w.-]+\.js)"></script>', page)
+    assert names[:2] == ["theme.js", "app.js"]
+    static = resources.files("llm_crossjury.web").joinpath("static")
+    for name in names:
+        text = static.joinpath(name).read_text(encoding="utf-8")
+        assert text.isascii(), name
+        assert not re.search(r"https?://", text), name
+        for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
+            assert sink not in text, name
 
 
 def test_markdown_links_are_limited_to_http_and_open_without_opener() -> None:
