@@ -56,6 +56,13 @@ Template:
 
 ## Approved changes
 
+### CI-7: Progressive step 1 and per-member retry (approved by the maintainer, 2026-11-09)
+- `core/sessions/models.py` `JuryTurn`: new `members_done: dict[int, MemberResult]`
+  (results written as each member finishes), `retrying: tuple[int, ...]` (members
+  being re-run alone) and `synthesis_stale: bool` (step 2 predates a retried member).
+  All have defaults, so stored sessions load unchanged.
+- Status: done
+
 ### CI-1: Pre-phase-1 contract changes (approved by the maintainer, 2026-11-04)
 - `schemas/review.py`: removed `TargetReview.score` and `TargetReview.score_rationale`.
   `PeerReview` field order is now `reviews`, `ranking_rationale`, `ranking`. Rankings

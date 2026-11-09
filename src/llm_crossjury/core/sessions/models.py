@@ -22,7 +22,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from llm_crossjury.core.compare_service import CompareResult, Selection
+from llm_crossjury.core.compare_service import CompareResult, MemberResult, Selection
 from llm_crossjury.core.providers.base import Backend
 
 SESSION_SCHEMA_VERSION = 1
@@ -109,6 +109,14 @@ class JuryTurn(_Frozen):
     """Conversation context given to the members when the jury is asked mid-session
     (built by the memory layer); ``None`` for a first turn."""
     step1: CompareResult | None = None
+    members_done: dict[int, MemberResult] = Field(default_factory=dict)
+    """Step-1 results that finished so far, by index into ``selections``, written as
+    each member completes so the page can show answers before the slowest one."""
+    retrying: tuple[int, ...] = ()
+    """Indices of members being re-run on their own (per-member retry)."""
+    synthesis_stale: bool = False
+    """A member was re-run after step 2 produced results: they no longer match the
+    current answers."""
     synthesis: dict[str, Any] = Field(default_factory=dict)
     """Latest JSON result of each step-2 endpoint, by stage name
     (:data:`SYNTHESIS_STAGES`), exactly as the endpoint returned it."""
