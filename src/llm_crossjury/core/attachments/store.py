@@ -6,6 +6,8 @@ never inside the repository::
 
     <data dir>/attachments/<sha256>/data.bin    the raw file
     <data dir>/attachments/<sha256>/meta.json   name, type, extracted text, metadata
+    <data dir>/attachments/<sha256>/image-<i>.bin  derived image i (page images, DOCX
+                                                  images; listed in the metadata)
 
 Directories are created owner-only (``0o700``) and files ``0o600`` where the platform
 supports POSIX permissions (on Windows the user profile's ACLs apply). Entries older
@@ -27,7 +29,11 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from llm_crossjury.core.attachments.build import AttachmentMeta, BuiltAttachment
+from llm_crossjury.core.attachments.build import (
+    AttachmentMeta,
+    BuiltAttachment,
+    DerivedImageMeta,
+)
 from llm_crossjury.core.attachments.limits import AttachmentError
 from llm_crossjury.core.providers.base import Attachment, AttachmentKind
 
@@ -114,6 +120,8 @@ class AttachmentStore:
             "fallback_text": att.fallback_text,
             "meta": built.meta.model_dump(mode="json"),
         }
+        for index, image in enumerate(built.derived_images):
+            _write_private(entry / _image_name(index), image.data)
         _write_private(entry / _DATA, att.data)
         _write_private(entry / _META, json.dumps(meta, ensure_ascii=False).encode("utf-8"))
         return att.sha256
@@ -146,10 +154,15 @@ class AttachmentStore:
                 data=data,
                 fallback_text=meta["fallback_text"],
             )
+            loaded = AttachmentMeta.model_validate(meta["meta"])
             return BuiltAttachment(
-                attachment=attachment, meta=AttachmentMeta.model_validate(meta["meta"])
+                attachment=attachment,
+                meta=loaded,
+                derived_images=tuple(
+                    _load_image(entry, index, info) for index, info in enumerate(loaded.derived)
+                ),
             )
-        except (KeyError, TypeError, ValueError, ValidationError):
+        except (KeyError, TypeError, ValueError, ValidationError, OSError):
             self.delete(attachment_id)
             raise _not_found(attachment_id) from None
 
@@ -194,6 +207,25 @@ class AttachmentStore:
 
     def _expired(self, created: float) -> bool:
         return self._clock() - created >= self._ttl
+
+
+def _image_name(index: int) -> str:
+    return f"image-{index}.bin"
+
+
+def _load_image(entry: Path, index: int, info: DerivedImageMeta) -> Attachment:
+    """Load derived image ``index`` and check it against its recorded sha256."""
+    data = (entry / _image_name(index)).read_bytes()
+    if hashlib.sha256(data).hexdigest() != info.sha256:
+        raise ValueError("digest mismatch")
+    return Attachment(
+        kind=AttachmentKind.IMAGE,
+        media_type=info.media_type,
+        filename=info.filename,
+        sha256=info.sha256,
+        data=data,
+        fallback_text=None,
+    )
 
 
 def _mkdir_private(path: Path) -> None:
