@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
+from importlib import resources
 from typing import Any
 
 import pytest
@@ -220,15 +222,13 @@ def test_synthesis_posts_keep_the_guards(stages: FakeStages) -> None:
 def test_page_has_the_synthesis_panel() -> None:
     client = _client(make_deps())
     page = client.get("/").text
-    for element_id in (
-        "synthesis-section",
-        "syn-instructions",
-        "syn-chair",
-        "syn-btn",
-        "syn-result",
-    ):
-        assert f'id="{element_id}"' in page
-    script = client.get("/app.js").text
+    static = resources.files("llm_crossjury.web").joinpath("static")
+    scripts = re.findall(r'<script src="/([\w.-]+\.js)"></script>', page)
+    assert "jury.js" in scripts
+    # Every jury turn in the thread builds its own step-2 panel (jury.js).
+    script = static.joinpath("jury.js").read_text(encoding="utf-8")
+    for cls in ("synthesis", "syn-btn", "synth-form", "synth-result", "resynth-btn"):
+        assert f'"{cls}' in script or f" {cls}" in script
     for path in ("estimate", "agreement", "finish", "resynthesize-estimate", "resynthesize"):
         assert f'"/api/synthesis/{path}"' in script
     assert "innerHTML" not in script

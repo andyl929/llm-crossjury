@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import re
 from collections.abc import Iterator
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -334,7 +336,11 @@ def test_synthesis_estimate_accepts_attachment_ids(
 def test_page_offers_attachments_with_the_upload_header() -> None:
     client = _client(_deps(None))
     page = client.get("/").text
-    script = client.get("/app.js").text
+    static = resources.files("llm_crossjury.web").joinpath("static")
+    script = "\n".join(
+        static.joinpath(name).read_text(encoding="utf-8")
+        for name in re.findall(r'<script src="/([\w.-]+\.js)"></script>', page)
+    )
     assert 'id="attach-input"' in page
     assert ".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif" in page
     assert UPLOAD_HEADER.lower() in script.lower()
