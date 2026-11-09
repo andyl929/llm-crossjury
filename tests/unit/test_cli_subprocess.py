@@ -620,3 +620,18 @@ def test_run_cli_redacts_masked_fragment_on_stderr(fake: FakeCli) -> None:
         _, stderr, _ = asyncio.run(run_cli(fake.invocation(cwd)))
     assert "abcde" not in stderr
     assert "proj" not in stderr
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="registry PATH fallback is Windows-only")
+def test_resolve_falls_back_to_persistent_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import llm_crossjury.core.providers.cli._subprocess as sub  # noqa: PLC0415
+
+    tool_dir = tmp_path / "newly-installed"
+    tool_dir.mkdir()
+    (tool_dir / "freshcli.cmd").write_text("@echo off\r\n", encoding="utf-8")
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    monkeypatch.setattr(sub, "_registry_path", lambda: str(tool_dir))
+    assert sub.resolve_executable("freshcli").parent == tool_dir
+    assert str(tool_dir) in sub.build_child_env()["PATH"]

@@ -204,9 +204,53 @@ def resolve_executable(command: str) -> Path:
     if not command:
         raise ProviderUnavailableError("no CLI command configured")
     found = shutil.which(command)
+    if found is None and sys.platform == "win32":
+        # The process may have inherited a stale PATH (e.g. an editor terminal opened
+        # before the CLI was installed); retry with the current persistent PATH.
+        found = shutil.which(command, path=effective_path())
     if found is None:
         raise ProviderUnavailableError(f"'{command}' CLI not found on PATH")
     return Path(found).absolute()
+
+
+def _registry_path() -> str:
+    """Return the persistent machine + user PATH from the Windows registry ("" elsewhere).
+
+    Only the ``Path`` values under the standard Environment keys are read; nothing
+    else (ADR 0002 forbids touching CLI credential or config locations).
+    """
+    if sys.platform != "win32":
+        return ""
+    import winreg  # noqa: PLC0415 - Windows only
+
+    parts: list[str] = []
+    keys = (
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        ),
+        (winreg.HKEY_CURRENT_USER, "Environment"),
+    )
+    for root, sub in keys:
+        try:
+            with winreg.OpenKey(root, sub) as key:
+                value, _kind = winreg.QueryValueEx(key, "Path")
+        except OSError:
+            continue
+        if isinstance(value, str) and value:
+            parts.append(os.path.expandvars(value))
+    return os.pathsep.join(parts)
+
+
+def effective_path() -> str:
+    """The process PATH, extended on Windows with persistent entries it lacks."""
+    current = os.environ.get("PATH", "")
+    extra = _registry_path()
+    if not extra:
+        return current
+    seen = {p.strip().lower() for p in current.split(os.pathsep) if p.strip()}
+    added = [p for p in extra.split(os.pathsep) if p.strip() and p.strip().lower() not in seen]
+    return os.pathsep.join([current, *added]) if added else current
 
 
 def is_batch_shim(executable: Path) -> bool:
@@ -246,6 +290,9 @@ def build_child_env(
         value = os.environ.get(name)
         if value is not None:
             env[name] = value
+    if "PATH" in env:
+        # CLI shims start further programs (e.g. node for npm-installed CLIs).
+        env["PATH"] = effective_path()
     for name, value in (overrides or {}).items():
         if _is_api_key_name(name):
             raise ProviderError(f"refusing to set {name} for a CLI child process (ADR 0002)")
