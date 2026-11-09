@@ -51,6 +51,20 @@ smooth key onboarding are first-class, not afterthoughts.
 - Local run history (titles, cost, date; content only if `store_content` is on).
 - Hallway test: 5 classmates use it on their own question; fix the top issues.
 
+### M1.5: Sessions, chat and memory (in progress, 2026-11-09)
+
+Results survive navigation and closed pages; continue any jury answer as a chat; ask
+the jury again mid-conversation (closed loop); layered memory keeps long research
+conversations affordable. Budget defaults raised and editable. Design:
+[`design/sessions-chat-memory.md`](design/sessions-chat-memory.md), ADR 0008.
+
+| Phase | Scope |
+|---|---|
+| A | session store, detached tasks, restore on load, app settings (budget, history, memory) |
+| B | chat UI: sidebar history, thread, continue buttons, composer, model switch |
+| C | memory layer: context layers, summaries, FTS retrieval, case file |
+| D | integration: jury inside a conversation, end-to-end tests |
+
 ### M2: v0.2 "download and use" (desktop app)
 
 - One-click desktop app for Windows and macOS (Linux AppImage if cheap):
