@@ -789,13 +789,17 @@ def make_call_fn(
             spec.provider, spec.model_id, spec.stage, member, backend=backend, deps=deps
         )
         price = checked_price(spec.provider, resolved.model_id, backend, deps)
-        prompt = inline_attachments(spec.prompt) if backend is Backend.CLI else spec.prompt
+        caps = deps.providers[(spec.provider, backend)].capabilities(resolved.model_id)
+        prompt = (
+            inline_attachments(spec.prompt, caps.input_modalities)
+            if backend is Backend.CLI
+            else spec.prompt
+        )
         entry = deps.registry.get(spec.provider, resolved.model_id)
         if entry is not None and entry.max_output and spec.max_output_tokens > entry.max_output:
             spec = replace(spec, max_output_tokens=entry.max_output)
         call_high = Decimal(0)
         if price is not None:
-            caps = deps.providers[(spec.provider, backend)].capabilities(resolved.model_id)
             planned = PlannedCall(
                 stage=spec.stage,
                 provider=spec.provider,

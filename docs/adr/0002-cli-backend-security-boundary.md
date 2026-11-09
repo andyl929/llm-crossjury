@@ -4,6 +4,7 @@
 - Date: 2026-11-04
 - Amended: 2026-11-04 (Grok Build CLI no longer pre-skipped)
 - Amended: 2026-11-08 (status per CLI after implementation; SIWC rejected)
+- Amended: 2026-11-08 (native images/PDFs for Claude Code over stdin)
 
 ## Context
 
@@ -96,7 +97,13 @@ are cited in each adapter's docstring).
 OpenAI's sanctioned program for this use case, but it requires the host application to
 run OAuth and store and refresh tokens, which violates "What llm-crossjury never does".
 
-**Attachments:** `cli` members receive attachments only as extracted text (ADR 0007).
+**Attachments:** `cli` members receive attachments as extracted text, except the
+kinds their adapter declares natively (ADR 0007). *Amended 2026-11-08:* Claude
+Code receives images and PDFs as base64 `image`/`document` blocks in one
+stream-json user message on **stdin** (`--input-format stream-json
+--output-format stream-json --verbose`). The data never enters argv, no file
+path is written and no tool is needed, so every rule above still holds; a stream
+that shows a tool call other than `StructuredOutput` is rejected.
 
 ## Consequences
 

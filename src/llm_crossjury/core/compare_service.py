@@ -829,10 +829,16 @@ def _member_prompt(  # noqa: PLR0917 - private helper of prepare_calls
     )
     if sel.backend is not Backend.CLI:
         return shared_prompt, member_receipts, tokens_by_id, refusal
-    # cli adapters ignore Message.attachments: inline the text (refused files are left
-    # out; a refused member is never called anyway).
-    textual = [b.attachment for b in built if b.attachment.fallback_text is not None]
-    prompt = inline_attachments(with_attachments(base_prompt, textual)) if textual else base_prompt
+    # cli adapters read only the attachments their capabilities declare: keep those,
+    # inline the rest as text (refused files are left out; a refused member is never
+    # called anyway).
+    kept = {r.id for r in member_receipts if r.mode != "refused"}
+    usable = [b.attachment for b in built if b.attachment.sha256 in kept]
+    prompt = (
+        inline_attachments(with_attachments(base_prompt, usable), caps.input_modalities)
+        if usable
+        else base_prompt
+    )
     return prompt, member_receipts, tokens_by_id, refusal
 
 

@@ -18,6 +18,7 @@ from llm_crossjury.core.cost.ledger import Budget, BudgetExceededError, LedgerEn
 from llm_crossjury.core.cost.pricing import PricingError
 from llm_crossjury.core.providers.base import (
     Backend,
+    Capabilities,
     CompletionRequest,
     CompletionResult,
     Provider,
@@ -257,6 +258,7 @@ class FakeCliProvider(MockProvider):
         detail: The check detail text.
         check_error: If set, :meth:`check` raises it.
         responder: Response text factory (default: an echo).
+        capabilities: Reported capabilities (default: the mock's, no native files).
     """
 
     backend = Backend.CLI
@@ -269,8 +271,9 @@ class FakeCliProvider(MockProvider):
         detail: str = "fake cli 1.0",
         check_error: Exception | None = None,
         responder: Callable[[CompletionRequest], str] | None = None,
+        capabilities: Capabilities | None = None,
     ) -> None:
-        super().__init__(name, responder or (lambda req: f"{name} cli answer"))
+        super().__init__(name, responder or (lambda req: f"{name} cli answer"), capabilities)
         self.available = available
         self.detail = detail
         self.check_error = check_error

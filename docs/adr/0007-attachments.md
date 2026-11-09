@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-08
+- Amended: 2026-11-08 (`cli` members may receive files natively)
 - Amends: SPEC §9 non-goal "Input formats other than Markdown and LaTeX" (task
   attachments are now in scope; Document Review mode is unchanged). Contract change
   CI-5 (`providers/base.py`, `registry/schema.py`), approved by the maintainer.
@@ -35,7 +36,12 @@ Vendors differ (researched 2026-11-08 from official docs):
      locally extracted text** (no `attachment_search`), so every member sees comparable
      material and no retrieval fees apply.
    - Word (DOCX): always converted locally to text (paragraphs and tables).
-   - `cli` (subscription) members receive `fallback_text` only; images are refused.
+   - `cli` (subscription) members follow the same rule, using the kinds their CLI
+     adapter declares in `input_modalities` (*amended 2026-11-08*). Claude Code
+     declares images and PDFs (where the registry entry lists them) and sends them
+     as base64 content blocks in a stream-json user message on stdin, with tools
+     still disabled (ADR 0002). A CLI that declares nothing gets `fallback_text`
+     only, and its members are refused images.
 4. **Transport: inline only.** No vendor Files API is used in v1, so nothing is stored
    on vendor file services and no cleanup state exists. Total attachment size per run
    is capped at **20 MB** (a product setting), below every vendor's inline limit.

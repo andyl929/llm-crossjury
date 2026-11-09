@@ -6,9 +6,11 @@ user message follows it, still inside the stable prefix, holding the attachments
 :func:`~llm_crossjury.core.attachments.render.sort_attachments` order. The adapters
 render that message natively or as fallback text.
 
-The ``cli`` (subscription) adapters ignore ``Message.attachments``, so their prompts
-are rewritten by :func:`inline_attachments`: the fallback blocks become part of the
-message text, and images (no text form) are refused.
+``cli`` (subscription) prompts are rewritten by :func:`inline_attachments`: attachments
+whose kind the CLI adapter declares in ``Capabilities.input_modalities`` stay on the
+message (the adapter sends them natively), the others become fallback blocks in the
+message text, and an attachment with neither form (an image) is refused. CLI adapters
+that declare no modalities therefore receive text only and never see an attachment.
 """
 
 from __future__ import annotations
@@ -61,15 +63,14 @@ def delivery_mode(
 ) -> DeliveryMode:
     """Decide how a member receives ``att``.
 
-    ``cli`` members get text only. Other members get the file natively when its kind
-    is in ``input_modalities`` (never for ``DOCUMENT`` in v1), else its text; an
-    attachment without text (an image) is refused.
+    A member gets the file natively when its kind is in ``input_modalities`` (never
+    for ``DOCUMENT`` in v1), else its text; an attachment without text (an image) is
+    refused. The rule is the same on both backends: a ``cli`` provider declares only
+    the kinds its adapter really delivers (``backend`` is kept for the callers and
+    only changes the wording of :func:`refusal_message`).
     """
-    if (
-        backend is not Backend.CLI
-        and att.kind is not AttachmentKind.DOCUMENT
-        and att.kind in input_modalities
-    ):
+    del backend  # same rule on both backends (see the docstring)
+    if att.kind is not AttachmentKind.DOCUMENT and att.kind in input_modalities:
         return "native"
     return "text" if att.fallback_text is not None else "refused"
 
@@ -104,9 +105,10 @@ def refusal_message(
     names = ", ".join(r.filename for r in refused)
     if backend is Backend.CLI:
         return (
-            f"Subscription (CLI) models receive attached files as extracted text only, and "
-            f"images have no text form ({names}). Remove the image(s) or use an API key "
-            "for this provider."
+            f"The subscription (CLI) model {provider}/{model} receives attached files as "
+            f"extracted text only here, and images have no text form ({names}). Remove the "
+            "image(s), pick a CLI model that accepts images, or use an API key for this "
+            "provider."
         )
     return (
         f"{provider}/{model} does not accept image attachments ({names}). Remove the "
@@ -144,28 +146,35 @@ def with_attachments(prompt: Prompt, attachments: Sequence[Attachment]) -> Promp
     )
 
 
-def inline_attachments(prompt: Prompt) -> Prompt:
-    """Rewrite ``prompt`` for a text-only (``cli``) member.
+def inline_attachments(
+    prompt: Prompt, input_modalities: frozenset[AttachmentKind] = frozenset()
+) -> Prompt:
+    """Rewrite ``prompt`` for a ``cli`` member.
 
-    Every message's attachments are replaced by their fallback blocks in the
-    message text, so nothing is silently dropped by an adapter that ignores
-    ``Message.attachments``.
+    Attachments the member takes natively (see :func:`delivery_mode`) stay on their
+    message; every other attachment is replaced by its fallback block in the message
+    text, so nothing is silently dropped by an adapter that only reads text. With
+    no ``input_modalities`` every attachment becomes text.
 
     Raises:
-        CapabilityNotSupportedError: an attachment has no text form (an image).
+        CapabilityNotSupportedError: an attachment is neither native nor has a text
+            form (an image for a CLI model without image input).
     """
 
     def convert(message: Message) -> Message:
         if not message.attachments:
             return message
-        missing = [a.filename for a in message.attachments if a.fallback_text is None]
+        modes = [(a, delivery_mode(a, input_modalities, Backend.CLI)) for a in message.attachments]
+        missing = [a.filename for a, mode in modes if mode == "refused"]
         if missing:
             raise CapabilityNotSupportedError(
-                "subscription (CLI) models receive attached files as extracted text only; "
-                f"images cannot be sent ({', '.join(missing)})"
+                "this subscription (CLI) model receives attached files as extracted text "
+                f"only, and images have no text form ({', '.join(missing)})"
             )
-        blocks = "\n\n".join(fallback_block(a) for a in message.attachments)
-        return Message(role=message.role, content=f"{message.content}\n\n{blocks}")
+        native = tuple(a for a, mode in modes if mode == "native")
+        blocks = "\n\n".join(fallback_block(a) for a, mode in modes if mode == "text")
+        content = f"{message.content}\n\n{blocks}" if blocks else message.content
+        return Message(role=message.role, content=content, attachments=native)
 
     return Prompt(
         stable_prefix=tuple(convert(m) for m in prompt.stable_prefix),
