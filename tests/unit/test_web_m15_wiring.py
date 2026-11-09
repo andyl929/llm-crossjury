@@ -19,6 +19,13 @@ def _chat(env: Env, sid: str, message: str) -> dict[str, Any]:
 
 def test_loop_jury_chat_jury_sends_a_default_case_file(tmp_path: Path) -> None:
     env = Env(tmp_path)
+    # One event loop for every request, so the background memory update started by the
+    # chat turn runs (a loop per request would orphan it).
+    with env.client:
+        _loop_jury_chat_jury(env)
+
+
+def _loop_jury_chat_jury(env: Env) -> None:
     sid = env.new_session()
     first = env.client.post(
         f"/api/run?session={sid}&turn={new_id()}", json=_run_body("anthropic", "openai")
@@ -43,12 +50,13 @@ def test_loop_jury_chat_jury_sends_a_default_case_file(tmp_path: Path) -> None:
 
 def test_deleting_a_session_drops_its_memory_rows(tmp_path: Path) -> None:
     env = Env(tmp_path)
-    sid = env.new_session()
-    _chat(env, sid, "quokka migration plan")
-    index = env.app.state.crossjury_memory_index
-    assert index.search(sid, "quokka", 3)
-    assert env.client.delete(f"/api/sessions/{sid}").json() == {"deleted": True}
-    assert not index.search(sid, "quokka", 3)
+    with env.client:  # see test_loop_jury_chat_jury_sends_a_default_case_file
+        sid = env.new_session()
+        _chat(env, sid, "quokka migration plan")
+        index = env.app.state.crossjury_memory_index
+        assert index.search(sid, "quokka", 3)
+        assert env.client.delete(f"/api/sessions/{sid}").json() == {"deleted": True}
+        assert not index.search(sid, "quokka", 3)
 
 
 def test_estimate_accepts_an_empty_message_but_send_does_not(tmp_path: Path) -> None:

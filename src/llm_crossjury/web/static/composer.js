@@ -869,7 +869,8 @@
     const turn = {
       kind: "jury", id: tid, created_at: new Date().toISOString(), status: "pending",
       task: req.task, attachment_ids: req.attachment_ids, selections: req.selections,
-      case_file: null, step1: null, synthesis: {}, synthesis_settings: null, error: null,
+      case_file: null, step1: null, members_done: {}, retrying: [], synthesis_stale: false,
+      synthesis: {}, synthesis_settings: null, error: null,
     };
     CJ.sessions.addTurn(turn);
     const saved = snapshotComposer();
@@ -877,6 +878,8 @@
     // The thread shows the new turn; the composer goes back to chat for follow-ups.
     if (chatAvailable()) setMode("chat");
     let body = Object.assign({}, req, { confirmed: confirmed, allow_unknown_cost: consent });
+    // Show each member's answer as soon as it is in, while the run is still going.
+    const stopWatch = CJ.sessions.watchTurn(tid);
     try {
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
@@ -910,6 +913,7 @@
         }
       }
     } finally {
+      stopWatch();
       C.busy = false;
       runBtn.textContent = "Ask models";
       renderAttachments();
@@ -1011,6 +1015,7 @@
     primaryAction: primaryAction,
     continueFrom: continueFrom,
     retryChat: retryChat,
+    resolveConflict: resolveConflict,
     prefill: prefill,
     onProvidersChanged: onProvidersChanged,
     onAvailability: onAvailability,
