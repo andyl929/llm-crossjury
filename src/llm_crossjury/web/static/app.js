@@ -487,6 +487,12 @@
     const parts = [KIND_TEXT[a.kind] || a.kind, fileSize(a.size)];
     if (a.pages !== null && a.pages !== undefined) parts.push(plural(a.pages, "page"));
     if (a.image_width && a.image_height) parts.push(a.image_width + "\u00d7" + a.image_height + " px");
+    const derived = (a.derived || []).length;
+    if (derived) {
+      parts.push(a.kind === "pdf"
+        ? (derived === 1 ? "1 page rendered as an image" : derived + " pages rendered as images")
+        : plural(derived, "image") + " for image-capable models");
+    }
     return parts.join(", ");
   }
 
@@ -625,12 +631,22 @@
 
   // Delivery tags: how a member receives (or would receive) each file.
   const MODE_TEXT = { native: "Native", text: "As text", refused: "Not sent" };
-  const MODE_CLASS = { native: "tag-ok", text: "tag-info", refused: "tag-err" };
+  const MODE_CLASS = { native: "tag-ok", text: "tag-info", "text+images": "tag-info", refused: "tag-err" };
+
+  // "text+images": the text plus derived images (rendered PDF pages, Word images).
+  function derivedImagesText(r) {
+    return plural(r.images || 0, r.kind === "pdf" ? "page image" : "image");
+  }
+
+  function modeText(r) {
+    if (r.mode === "text+images") return "Text + " + derivedImagesText(r);
+    return MODE_TEXT[r.mode] || r.mode;
+  }
 
   function deliveryList(items) {
     if (!items || !items.length) return null;
     return el("ul", { class: "attach-modes", "aria-label": "Attachments" }, items.map((r) => el("li", {}, [
-      el("span", { class: "tag " + (MODE_CLASS[r.mode] || ""), text: MODE_TEXT[r.mode] || r.mode }),
+      el("span", { class: "tag " + (MODE_CLASS[r.mode] || ""), text: modeText(r) }),
       el("span", { class: "attach-name", text: r.filename }),
       ...r.warnings.map((w) => el("div", { class: "attach-warn", text: w })),
     ])));
@@ -733,7 +749,9 @@
           el("td", { text: providerLabel(a.provider) + (a.backend === "cli" ? " (subscription)" : "") }),
           el("td", { class: "num", text: a.mode === "refused"
             ? "not sent: this model cannot read it"
-            : (a.mode === "native" ? "native" : "as text") + ", \u2248 " + tokens(a.tokens) +
+            : (a.mode === "native" ? "native"
+              : a.mode === "text+images" ? "text + " + derivedImagesText(a) : "as text") +
+              ", \u2248 " + tokens(a.tokens) +
               (a.vendor_counted ? " (counted by the vendor)" : "") }),
         ]))),
       ])));
