@@ -3,80 +3,141 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>llm-crossjury Compare</title>
+  <meta name="color-scheme" content="light dark">
+  <title>llm-crossjury</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/app.css">
+  <script src="/theme.js"></script>
 </head>
-<body>
+<body class="has-strip">
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-mark" viewBox="0 0 24 24"><path d="M4 3v7M9.33 3v7M14.67 3v7M20 3v7M4 10l8 6.5 8-6.5M12 16.5V21"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+    <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-system" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5v.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></symbol>
+    <symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 4v16M8 20h8M5 7h14M5 7l-3 6.5a3 3 0 0 0 6 0zM19 7l-3 6.5a3 3 0 0 0 6 0z"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h12l-2.5 4 2.5 4H5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 10A8 8 0 0 0 5.2 7.3L4 9M4 4.5V9h4.5M4.5 14a8 8 0 0 0 14.3 2.7L20 15M20 19.5V15h-4.5"/></symbol>
+  </svg>
+
   <header class="topbar">
-    <div class="brand">llm-crossjury <span class="brand-mode">Compare</span></div>
-    <div id="budget-summary" class="budget-summary" aria-live="polite"></div>
-    <a class="topbar-link" href="/settings">Settings</a>
+    <a class="brand" href="/">
+      <svg class="icon brand-mark" aria-hidden="true"><use href="#i-mark"/></svg>
+      <span class="brand-name">llm-crossjury</span>
+    </a>
+    <nav class="topnav" aria-label="Main">
+      <a href="/" aria-current="page">Compare</a>
+      <a href="/settings">Settings</a>
+    </nav>
+    <button id="theme-toggle" class="icon-btn theme-toggle" type="button" aria-label="Theme: system">
+      <svg class="icon" aria-hidden="true"><use href="#i-system"/></svg>
+    </button>
   </header>
 
-  <main class="page">
-    <section id="task-panel" class="panel task-panel">
-      <label for="task" class="section-label">Task</label>
-      <textarea id="task" rows="6" spellcheck="true"
-        placeholder="Ask a question or describe a task. Each selected model answers it independently."></textarea>
-      <div class="attach-bar">
-        <button id="attach-btn" type="button" class="btn btn-small">Attach files</button>
-        <input id="attach-input" type="file" multiple hidden
-          accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif">
-        <span id="attach-hint" class="muted">PDF, Word (DOCX) or images, up to 20 MB in total. You can also drop files here or paste a screenshot (Ctrl+V).</span>
-      </div>
-      <ul id="attach-list" class="attach-list" hidden></ul>
-      <p id="attach-privacy" class="attach-privacy" hidden></p>
-    </section>
+  <main id="main" class="page" tabindex="-1">
+    <h1 class="visually-hidden">Compare AI answers</h1>
 
-    <section class="panel">
-      <h2 class="section-label">Models</h2>
-      <div id="providers" class="providers">
-        <p class="muted">Loading providers...</p>
-      </div>
-    </section>
+    <div class="bench">
+      <section id="task-panel" class="panel task-panel" aria-labelledby="task-heading">
+        <div class="panel-head">
+          <h2 id="task-heading" class="panel-title"><span class="step">Step 1</span> <label for="task">Question</label></h2>
+        </div>
+        <textarea id="task" rows="8" spellcheck="true" aria-describedby="task-help"
+          placeholder="Ask a question or describe a task. Every selected model answers it on its own."></textarea>
+        <p id="task-help" class="help">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to estimate the cost, then again to ask the models.</p>
+        <div class="attach-bar">
+          <button id="attach-btn" type="button" class="btn">
+            <svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg>Attach files
+          </button>
+          <input id="attach-input" type="file" multiple hidden
+            accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif">
+          <span id="attach-hint" class="help">PDF, Word or images, up to 20 MB in total. Drop files here or paste a screenshot.</span>
+        </div>
+        <ul id="attach-list" class="attach-list" hidden></ul>
+        <p id="attach-privacy" class="note" hidden></p>
+      </section>
 
-    <section class="panel actions-panel">
-      <label id="consent-box" class="consent" hidden>
-        <input type="checkbox" id="consent">
-        <span id="consent-text">I understand: cost is unknown, calls count against my plan's usage limits, and this mode is experimental</span>
-      </label>
-      <div class="actions">
-        <button id="estimate-btn" type="button" class="btn">Estimate cost</button>
-        <button id="run-btn" type="button" class="btn btn-primary" disabled>Run</button>
-        <span id="action-hint" class="muted">Pick at least one model, then estimate the cost.</span>
-      </div>
-      <div id="estimate" class="estimate" hidden></div>
-    </section>
+      <section class="panel models-panel" aria-labelledby="models-heading">
+        <div class="panel-head">
+          <h2 id="models-heading" class="panel-title">Models</h2>
+          <span id="models-count" class="panel-aside" aria-live="polite"></span>
+        </div>
+        <div id="providers" class="rack">
+          <p class="help rack-loading">Loading models&hellip;</p>
+        </div>
+        <div id="estimate" class="estimate" hidden></div>
+        <label id="consent-box" class="consent" hidden>
+          <input type="checkbox" id="consent">
+          <span id="consent-text">I understand: cost is unknown, calls count against my plan's usage limits, and this mode is experimental</span>
+        </label>
+      </section>
+    </div>
 
     <div id="message" class="message" role="alert" hidden></div>
 
-    <section id="results-section" class="results-section" hidden>
-      <div class="results-head">
-        <h2>Results</h2>
-        <div id="run-total" class="run-total"></div>
-      </div>
-      <div id="results" class="results"></div>
-    </section>
-    <section id="synthesis-section" class="panel synthesis" hidden>
-      <div class="synth-head">
-        <h2>AI synthesis</h2>
-        <p class="muted">Measure agreement, let the models review each other anonymously, and have a chair model write one final answer.</p>
-      </div>
-      <div id="syn-unavailable" class="muted" hidden></div>
-      <div id="syn-form" class="synth-form">
-        <p id="syn-attach-note" class="muted" hidden></p>
-        <label for="syn-instructions" class="field-label">Extra instructions <span class="muted">(optional)</span></label>
-        <textarea id="syn-instructions" rows="3" spellcheck="true"
-          placeholder="Comparison criteria, or a follow-up question for the reviewers and the chair."></textarea>
-        <div class="synth-row">
-          <label class="field" for="syn-chair">
-            <span class="field-label">Chair model</span>
-            <select id="syn-chair"></select>
+    <section id="answers-section" class="answers-section" aria-labelledby="answers-heading">
+      <div class="section-head">
+        <h2 id="answers-heading" class="section-title">Answers</h2>
+        <div id="answers-tools" class="toolbar" hidden>
+          <label class="switch">
+            <input id="sync-scroll" type="checkbox">
+            <span>Scroll together</span>
           </label>
+          <button id="export-btn" type="button" class="btn">
+            <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export Markdown
+          </button>
+        </div>
+      </div>
+      <div id="answers-empty" class="empty">
+        <ol class="empty-steps">
+          <li><strong>Ask.</strong> Write a question and attach any files it needs.</li>
+          <li><strong>Compare.</strong> Pick up to four models. Each answers on its own, and the answers appear here side by side.</li>
+          <li><strong>Synthesize.</strong> The models review each other anonymously, and a chair model writes one final answer with the points still in dispute.</li>
+        </ol>
+        <p class="help">Every step shows its cost before it runs. Subscription models show plan usage instead of dollars.</p>
+      </div>
+      <div id="results-section" hidden>
+        <div id="run-total" class="run-total"></div>
+        <div id="results" class="answers"></div>
+      </div>
+    </section>
+
+    <section id="synthesis-section" class="panel synthesis" aria-labelledby="synthesis-heading" hidden>
+      <div class="panel-head synth-head">
+        <h2 id="synthesis-heading" class="panel-title"><span class="step">Step 2</span> Synthesis</h2>
+        <p class="help">Measure agreement, let the models review each other anonymously, and have a chair model write one final answer.</p>
+      </div>
+      <p id="syn-unavailable" class="empty-inline" hidden></p>
+      <div id="syn-form" class="synth-form">
+        <p id="syn-attach-note" class="note" hidden></p>
+        <div class="synth-fields">
+          <div class="field field-wide">
+            <label for="syn-instructions" class="field-label">Extra instructions <span class="optional">optional</span></label>
+            <textarea id="syn-instructions" rows="3" spellcheck="true"
+              placeholder="Comparison criteria, or a follow-up question for the reviewers and the chair."></textarea>
+          </div>
+          <div class="field">
+            <label for="syn-chair" class="field-label">Chair model</label>
+            <select id="syn-chair"></select>
+          </div>
           <fieldset class="field tier">
             <legend class="field-label">Review tier</legend>
-            <label><input type="radio" name="syn-tier" value="economy" checked> Economy <span class="muted">fast models</span></label>
-            <label><input type="radio" name="syn-tier" value="standard"> Standard <span class="muted">same models as above</span></label>
+            <label class="radio"><input type="radio" name="syn-tier" value="economy" checked> Economy <span class="help">fast models</span></label>
+            <label class="radio"><input type="radio" name="syn-tier" value="standard"> Standard <span class="help">the models above</span></label>
           </fieldset>
         </div>
         <label id="syn-consent-box" class="consent" hidden>
@@ -85,18 +146,49 @@
         </label>
         <div class="actions">
           <button id="syn-btn" type="button" class="btn btn-primary" disabled>AI synthesize</button>
-          <span id="syn-status" class="muted" aria-live="polite"></span>
+          <span id="syn-status" class="status" aria-live="polite"></span>
         </div>
         <details id="syn-breakdown" class="breakdown" hidden>
           <summary>Cost breakdown</summary>
           <div id="syn-breakdown-body"></div>
         </details>
       </div>
+      <ol id="syn-progress" class="stepper" aria-label="Synthesis progress" hidden></ol>
       <div id="syn-message" class="message" role="alert" hidden></div>
       <div id="syn-decision" class="decision" hidden></div>
       <div id="syn-result" class="synth-result" hidden></div>
     </section>
   </main>
+
+  <footer class="strip" aria-label="Cost and run controls">
+    <div class="strip-inner">
+      <dl class="readouts">
+        <div class="readout" id="strip-estimate">
+          <dt>Estimate</dt>
+          <dd><span class="readout-value">&ndash;</span><span class="readout-sub">Not estimated</span></dd>
+        </div>
+        <div class="readout readout-secondary" id="strip-last">
+          <dt>Last cost</dt>
+          <dd><span class="readout-value">&ndash;</span><span class="readout-sub">Nothing run yet</span></dd>
+        </div>
+        <div class="readout readout-secondary" id="strip-today">
+          <dt>Today</dt>
+          <dd><span class="gauge" aria-hidden="true"></span><span class="readout-value">&ndash;</span><span class="readout-sub"></span></dd>
+        </div>
+        <div class="readout readout-secondary" id="strip-plan" hidden>
+          <dt>Plan calls</dt>
+          <dd><span class="readout-value">0</span><span class="readout-sub">this session</span></dd>
+        </div>
+      </dl>
+      <div class="strip-actions">
+        <span id="action-hint" class="strip-hint" aria-live="polite">Pick at least one model, then estimate the cost.</span>
+        <button id="estimate-btn" type="button" class="btn btn-strip">Estimate cost</button>
+        <button id="run-btn" type="button" class="btn btn-primary btn-run" disabled aria-keyshortcuts="Control+Enter Meta+Enter">Ask models</button>
+      </div>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="/app.js"></script>
 </body>
