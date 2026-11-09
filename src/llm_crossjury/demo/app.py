@@ -226,7 +226,12 @@ def create_demo_app(
         directory.mkdir(parents=True, exist_ok=True)
     ui_state = config / "ui-state.json"
     # No key is set in a demo: skip the first-run wizard, which would otherwise open.
-    ui_state.write_text(json.dumps({"onboarding_dismissed": True}) + "\n", encoding="utf-8")
+    # The home page tutorial stays available from "How it works" but does not open by
+    # itself (it would cover the demo's first screen and the README captures).
+    ui_state.write_text(
+        json.dumps({"onboarding_dismissed": True, "tutorial_seen": True}) + "\n",
+        encoding="utf-8",
+    )
     # Sessions and app settings live under data_dir too, never in the user's real data
     # or config directory. The demo's default budget is the generous simulated one.
     settings = AppSettingsStore(

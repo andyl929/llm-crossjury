@@ -785,20 +785,20 @@
 
   // ------------------------------------------------------------------ init
 
-  async function maybeOnboard() {
-    // First run (no key from any source, wizard not dismissed): open the setup wizard.
+  // First run: no usable provider (no API key from any source, no subscription CLI
+  // known to be ready) and the wizard was not dismissed. The server never runs a CLI
+  // check for this; until one has run (cli_checked false) it decides on keys alone.
+  async function onboardingState() {
     try {
       const resp = await fetch("/api/onboarding", { headers: { Accept: "application/json" } });
-      if (!resp.ok) return false;
-      const data = await resp.json();
-      if (data && data.show === true) {
-        location.assign("/settings?onboarding=1");
-        return true;
-      }
-    } catch (err) {
-      // Onboarding is optional; the main page works without it.
+      return resp.ok ? await resp.json() : null;
+    } catch (_) {
+      return null;  // onboarding is optional; the page works without it
     }
-    return false;
+  }
+
+  function openWizard() {
+    location.assign("/settings?onboarding=1");
   }
 
   Object.assign(CJ, {
@@ -820,7 +820,11 @@
       showMessage("Part of this page did not load. Stop llm-crossjury in your terminal, start it again, then reload this page.");
       return;
     }
-    if (await maybeOnboard()) return;
+    let onboarding = await onboardingState();
+    if (onboarding && onboarding.show === true && onboarding.cli_checked === true) {
+      openWizard();
+      return;
+    }
     document.addEventListener("keydown", onShortcut);
     document.addEventListener("visibilitychange", () => {
       refreshProvidersIfChanged();
@@ -837,7 +841,17 @@
     CJ.composer.init();
     CJ.sessions.initSidebar();
     await loadProviders(false);
+    if (onboarding && onboarding.show === true) {
+      // Decided on keys alone: ask again now that the CLIs were checked, unless the
+      // user has started typing meanwhile.
+      onboarding = await onboardingState();
+      if (onboarding && onboarding.show === true && !$("task").value.trim()) {
+        openWizard();
+        return;
+      }
+    }
     await CJ.sessions.start();
+    if (CJ.tour) CJ.tour.afterStart(onboarding);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

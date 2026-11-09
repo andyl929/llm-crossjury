@@ -1,5 +1,5 @@
-// llm-crossjury settings page: API keys, the first-run onboarding wizard, and the app
-// settings (budget, history, memory).
+// llm-crossjury settings page: API keys, the first-run setup wizard (subscriptions and
+// API keys), and the app settings (budget, history, memory).
 // Vanilla JS, no build step. Server text is inserted with textContent only.
 // A key typed by the user lives only in a password input until it is sent; it is
 // never written into the page, the console or storage.
@@ -13,15 +13,18 @@
   const state = {
     keys: [],
     onboarding: null,
-    step: 1,
-    wizardProvider: null,
+    step: "welcome",
+    path: "both",
+    os: "unix",
+    cliLoaded: false,
+    cliLoading: false,
+    rechecked: false,
     busy: false,
     app: null,
     providers: null,
     budgetInfo: null,
     memoryOptions: [],
   };
-  const STEPS = ["Keys or subscriptions", "Get a key", "Paste", "Test", "Limits", "Done"];
 
   function el(tag, attrs, children) {
     const node = document.createElement(tag);
@@ -253,111 +256,295 @@
   }
 
   // ------------------------------------------------------------------ wizard
+  //
+  // Up to four steps: Welcome (pick a path), Subscriptions, API keys, Done. The path
+  // decides which of the middle steps are shown. Every step can be skipped. The
+  // subscription step only shows commands and re-checks; it never runs anything.
+
+  const STEP_NAMES = { welcome: "Welcome", subs: "Subscriptions", keys: "API keys", done: "Done" };
+  const PATHS = { subs: ["welcome", "subs", "done"], keys: ["welcome", "keys", "done"], both: ["welcome", "subs", "keys", "done"] };
+  const CLI_STATE_TEXT = {
+    not_checked: ["lamp", "Checking"],
+    not_installed: ["lamp-warn", "Not installed"],
+    signed_out: ["lamp-warn", "Installed, not signed in"],
+    ready: ["lamp-ok", "Ready"],
+  };
 
   function wizardRequested() {
     return new URLSearchParams(window.location.search).get("onboarding") === "1";
   }
 
-  function renderWizardStatic() {
-    const ob = state.onboarding;
-    $("wizard-links").replaceChildren(...ob.providers.map((p) => el("li", {}, [
-      el("strong", { text: p.label }),
-      vendorLink(p.key_page_url, p.key_page_label),
-    ])));
-    const select = $("wizard-provider");
-    select.replaceChildren(...ob.providers.map((p) => el("option", { value: p.name, text: p.label })));
-    if (state.wizardProvider) select.value = state.wizardProvider;
-    const b = ob.budget;
-    const money = (v) => (b.currency === "USD" ? "$" : b.currency + " ") + Number(v).toFixed(2);
-    $("wizard-budget").replaceChildren(
-      el("div", {}, [el("dt", { text: "Daily limit" }), el("dd", { text: money(b.daily_limit) })]),
-      el("div", {}, [el("dt", { text: "Limit per run" }), el("dd", { text: money(b.run_limit) })]),
-      el("div", {}, [el("dt", { text: "Ask before runs above" }), el("dd", { text: money(b.confirm_above) })]),
-    );
+  function wizardSteps() {
+    return PATHS[state.path] || PATHS.both;
+  }
+
+  function detectOs() {
+    const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || "";
+    return /win/i.test(platform) ? "windows" : "unix";
+  }
+
+  function renderProgress() {
+    const steps = wizardSteps();
+    const index = steps.indexOf(state.step);
+    $("wizard-progress").replaceChildren(...steps.map((name, i) => {
+      const cls = i === index ? "current" : (i < index ? "done" : null);
+      return el("li", { class: cls, "aria-current": i === index ? "step" : null }, [
+        el("span", { class: "step-mark", "aria-hidden": "true" }, i < index ? icon("check") : String(i + 1)),
+        el("span", { class: "step-name", text: STEP_NAMES[name] }),
+        el("span", { class: "visually-hidden", text: " (step " + (i + 1) + " of " + steps.length + (i < index ? ", done)" : ")") }),
+      ]);
+    }));
   }
 
   function renderWizardStep(moveFocus) {
+    const steps = wizardSteps();
+    const index = steps.indexOf(state.step);
     for (const node of document.querySelectorAll(".wizard-step")) {
-      node.hidden = Number(node.dataset.step) !== state.step;
+      node.hidden = node.dataset.step !== state.step;
     }
-    $("wizard-progress").replaceChildren(...STEPS.map((name, i) => {
-      const n = i + 1;
-      const cls = n === state.step ? "current" : (n < state.step ? "done" : null);
-      return el("li", { class: cls, "aria-current": n === state.step ? "step" : null }, [
-        el("span", { class: "step-mark", "aria-hidden": "true" }, n < state.step ? icon("check") : String(n)),
-        el("span", { class: "step-name", text: name }),
-        n < state.step ? el("span", { class: "visually-hidden", text: " (done)" }) : null,
-      ]);
-    }));
-    $("wizard-back").disabled = state.step === 1;
-    $("wizard-next").hidden = state.step === STEPS.length;
-    $("wizard-skip").textContent = state.step === STEPS.length ? "Close" : "Skip setup";
-    if (state.step === 4) {
-      const p = providerLabel(state.wizardProvider || $("wizard-provider").value);
-      $("wizard-test").textContent = "Test " + p + " connection";
-    }
+    renderProgress();
+    $("wizard-back").disabled = index === 0;
+    $("wizard-next").hidden = index === steps.length - 1;
+    $("wizard-skip").hidden = index === steps.length - 1;  // Done has its own two exits
+    // One primary action in view: on the key step that is "Save and test".
+    $("wizard-next").className = "btn" + (state.step === "keys" ? "" : " btn-primary");
+    if (state.step === "subs") loadCliStatus(false);
+    if (state.step === "keys") renderKeyStep();
+    if (state.step === "done") renderDone();
     if (moveFocus) {
       const heading = document.querySelector('.wizard-step[data-step="' + state.step + '"] h3');
       if (heading) { heading.setAttribute("tabindex", "-1"); heading.focus(); }
     }
   }
 
-  function providerLabel(name) {
-    const found = (state.onboarding ? state.onboarding.providers : []).find((p) => p.name === name);
-    return found ? found.label : name;
-  }
-
-  function anyKeySet() {
-    return state.keys.some((k) => k.status === "set");
-  }
-
-  function goStep(step) {
-    if (step === 4 && !anyKeySet()) {
-      setStatus($("wizard-save-status"), "Save a key first, or skip setup.", "result-error");
-      $("wizard-key").focus();
-      return;
-    }
-    state.step = Math.max(1, Math.min(STEPS.length, step));
+  function goStep(delta) {
+    const steps = wizardSteps();
+    const index = Math.max(0, Math.min(steps.length - 1, steps.indexOf(state.step) + delta));
+    state.step = steps[index];
     renderWizardStep(true);
   }
 
-  async function closeWizard() {
+  // -------------------------------------------------------------- subscriptions
+
+  function copyButton(text, what) {
+    const button = el("button", {
+      type: "button", class: "icon-btn copy-btn", "aria-label": "Copy " + what, title: "Copy",
+    }, icon("copy"));
+    button.addEventListener("click", async () => {
+      let ok = false;
+      try { await navigator.clipboard.writeText(text); ok = true; } catch (_) { ok = false; }
+      button.setAttribute("title", ok ? "Copied" : "Copy failed: select the text and copy it");
+      setStatus($("cli-status"), ok ? "Copied: " + text : "Copy failed. Select the command and copy it.", ok ? "result-valid" : "result-error");
+    });
+    return button;
+  }
+
+  function commandLine(text, what) {
+    return el("div", { class: "cmd-line" }, [el("code", { class: "cmd", text: text }), copyButton(text, what)]);
+  }
+
+  function installCommands(cli) {
+    const all = cli.install_commands || [];
+    const mine = all.filter((c) => c.platform === state.os || c.platform === "any");
+    return mine.length ? mine : all;
+  }
+
+  function cliRow(p) {
+    const cli = p.cli;
+    // Without a login check, "ready" only means the tool was found.
+    const [lampCls, lampText] = cli.state === "ready" && !cli.login_checked
+      ? ["lamp-ok", "Found"]
+      : CLI_STATE_TEXT[cli.state] || CLI_STATE_TEXT.not_checked;
+    const version = cli.version ? " (" + cli.version + ")" : "";
+    const head = el("div", { class: "cli-row-head" }, [
+      el("h4", { class: "cli-name", text: cli.product }),
+      el("span", { class: "cli-plan", text: "for " + cli.plan }),
+      cli.experimental ? el("span", { class: "tag tag-warn", text: "Experimental" }) : null,
+      el("span", { class: "lamp " + lampCls, text: lampText }),
+    ]);
+    const body = [];
+    if (cli.state === "ready") {
+      body.push(el("p", { class: "help", text: cli.login_checked
+        ? "Signed in" + version + ". Pick Subscription on its model row."
+        : "Installed" + version + ". It cannot report its sign-in, so if you have not signed in yet, run " + cli.sign_in_command + " once in a terminal." }));
+    } else if (cli.state !== "not_checked") {
+      const steps = [];
+      if (cli.state === "not_installed") {
+        const commands = installCommands(cli);
+        steps.push(el("li", {}, [
+          el("span", { class: "cmd-label", text: "Install" }),
+          ...commands.map((c, i) => el("div", { class: "cmd-option" }, [
+            i > 0 ? el("span", { class: "help", text: "or, " + c.label }) : (commands.length > 1 ? el("span", { class: "help", text: c.label }) : null),
+            commandLine(c.command, cli.product + " install command"),
+          ])),
+        ]));
+      }
+      steps.push(el("li", {}, [
+        el("span", { class: "cmd-label", text: "Sign in" }),
+        commandLine(cli.sign_in_command, cli.product + " sign-in command"),
+        el("span", { class: "help", text: cli.sign_in }),
+      ]));
+      body.push(el("ol", { class: "cmd-steps" }, steps));
+    }
+    return el("div", { class: "cli-row", "data-provider": p.name }, [head, ...body]);
+  }
+
+  function renderCliRows() {
+    const rows = (state.providers || []).filter((p) => p.cli);
+    const box = $("cli-rows");
+    if (!rows.length) {
+      box.replaceChildren(el("p", { class: "help rack-empty", text: "No subscription tools are offered in this setup." }));
+      return;
+    }
+    box.replaceChildren(...rows.map(cliRow));
+    document.querySelector(".os-switch").hidden = !rows.some((p) => p.cli.state === "not_installed");
+    for (const button of document.querySelectorAll(".os-switch [data-os]")) {
+      button.setAttribute("aria-pressed", String(button.dataset.os === state.os));
+    }
+  }
+
+  async function loadCliStatus(refresh) {
+    if (state.cliLoading) return;
+    if (!refresh && state.providers && state.cliLoaded) { renderCliRows(); return; }
+    state.cliLoading = true;
+    const button = $("cli-recheck");
+    button.disabled = true;
+    const status = $("cli-status");
+    status.replaceChildren(el("span", { class: "spinner" }), el("span", { text: "Checking\u2026" }));
+    status.className = "status";
+    try {
+      const data = await api("GET", "/api/providers" + (refresh ? "?refresh=true" : ""));
+      state.providers = data.providers;
+      state.budgetInfo = data.budget;
+      state.cliLoaded = true;
+      renderCliRows();
+      const clis = data.providers.filter((p) => p.cli);
+      const ready = clis.filter((p) => p.cli.state === "ready").length;
+      setStatus(status, ready + " of " + clis.length + " ready.", ready ? "result-valid" : "muted");
+      if (refresh) state.rechecked = true;
+      $("cli-tip").hidden = !(state.os === "windows" && state.rechecked && clis.some((p) => p.cli.state === "not_installed"));
+    } catch (err) {
+      setStatus(status, err.message, "result-error");
+    } finally {
+      state.cliLoading = false;
+      button.disabled = false;
+    }
+  }
+
+  // -------------------------------------------------------------- API keys
+
+  function renderKeyStep() {
+    const select = $("wizard-provider");
+    if (!select.options.length) {
+      select.replaceChildren(...state.onboarding.providers.map((p) => el("option", { value: p.name, text: p.label })));
+      const firstMissing = state.keys.find((k) => k.status !== "set");
+      if (firstMissing) select.value = firstMissing.name;
+    }
+    renderKeyLink();
+    $("wizard-key-list").replaceChildren(...state.keys.map((k) => el("li", {}, [
+      el("span", { class: "status-name", text: k.label }),
+      el("span", { class: "lamp " + (k.status === "set" ? "lamp-ok" : "lamp"), text: k.status === "set" ? "Key set" : "No key" }),
+    ])));
+  }
+
+  function renderKeyLink() {
+    const vendor = state.onboarding.providers.find((p) => p.name === $("wizard-provider").value);
+    $("wizard-key-link").replaceChildren(vendor ? el("span", {}, ["Get a key: ", vendorLink(vendor.key_page_url, vendor.key_page_label)]) : "");
+  }
+
+  async function saveAndTest(event) {
+    event.preventDefault();
+    const input = $("wizard-key");
+    const status = $("wizard-save-status");
+    const provider = $("wizard-provider").value;
+    if (!input.value.trim()) { setStatus(status, "Paste a key first.", "result-error"); input.focus(); return; }
+    $("wizard-save").disabled = true;
+    try {
+      const saved = await saveKey(provider, input);
+      await loadKeys();
+      renderKeyStep();
+      if (!saved.applied) {
+        setStatus(status, saved.message, "result-network_error");
+        return;
+      }
+      await testKey(provider, status, null);
+      renderKeyStep();
+    } catch (err) {
+      setStatus(status, err.message, "result-error");
+    } finally {
+      $("wizard-save").disabled = false;
+    }
+  }
+
+  // -------------------------------------------------------------- done
+
+  function renderDone() {
+    const b = state.onboarding.budget;
+    const fmt = (v) => money(v, b.currency);
+    $("wizard-budget").replaceChildren(
+      el("div", {}, [el("dt", { text: "Per run" }), el("dd", { text: fmt(b.run_limit) })]),
+      el("div", {}, [el("dt", { text: "Per day" }), el("dd", { text: fmt(b.daily_limit) })]),
+      el("div", {}, [el("dt", { text: "Confirm above" }), el("dd", { text: fmt(b.confirm_above) })]),
+    );
+    const rows = state.keys.map((k) => {
+      const p = (state.providers || []).find((x) => x.name === k.name);
+      const ways = [];
+      if (k.status === "set") ways.push("API key");
+      if (p && p.cli && p.cli.state === "ready") ways.push(p.cli.product);
+      return { label: k.label, ways: ways };
+    });
+    const ready = rows.filter((r) => r.ways.length).length;
+    $("wizard-done-title").textContent = ready ? "Ready to go" : "Nothing connected yet";
+    $("wizard-done-intro").textContent = ready
+      ? (ready === 1 ? "1 vendor is connected." : ready + " vendors are connected.") + " Comparing works best with two or more."
+      : "You can still look around. Add a key or sign in to a tool later: Settings has everything from this setup.";
+    $("wizard-summary").replaceChildren(...rows.map((r) => el("li", {}, [
+      el("span", { class: "status-name", text: r.label }),
+      el("span", { class: "lamp " + (r.ways.length ? "lamp-ok" : "lamp"), text: r.ways.length ? r.ways.join(" and ") : "Not connected" }),
+    ])));
+    // The subscription states may not be loaded yet when the subscription step was skipped.
+    if (!state.cliLoaded && !state.cliLoading) loadCliStatus(false).then(() => { if (state.step === "done") renderDone(); });
+  }
+
+  async function finishWizard(target) {
     try { await api("POST", "/api/onboarding/dismiss", { dismissed: true }); } catch (_) { /* best effort */ }
-    window.location.assign("/settings");
+    window.location.assign(target);
+  }
+
+  function leaveTarget() {
+    return new URLSearchParams(window.location.search).get("from") === "settings" ? "/settings" : "/";
   }
 
   function initWizard() {
     $("wizard").hidden = false;
     $("open-wizard").hidden = true;
-    renderWizardStatic();
+    $("main").classList.add("wizard-open");
+    state.os = detectOs();
+    state.step = "welcome";
     renderWizardStep(false);
-    $("wizard-next").addEventListener("click", () => goStep(state.step + 1));
-    $("wizard-back").addEventListener("click", () => goStep(state.step - 1));
-    $("wizard-skip").addEventListener("click", closeWizard);
-    $("wizard-provider").addEventListener("change", (e) => { state.wizardProvider = e.target.value; });
-    $("wizard-save-form").addEventListener("submit", async (event) => {
+    for (const radio of document.querySelectorAll('input[name="wizard-path"]')) {
+      radio.addEventListener("change", () => { state.path = radio.value; renderProgress(); });
+    }
+    for (const button of document.querySelectorAll(".os-switch [data-os]")) {
+      button.addEventListener("click", () => { state.os = button.dataset.os; renderCliRows(); });
+    }
+    $("wizard-next").addEventListener("click", () => goStep(1));
+    $("wizard-back").addEventListener("click", () => goStep(-1));
+    $("wizard-skip").addEventListener("click", () => finishWizard(leaveTarget()));
+    $("wizard-finish").addEventListener("click", () => finishWizard("/"));
+    $("wizard-example").addEventListener("click", () => finishWizard("/?example=1"));
+    $("cli-recheck").addEventListener("click", () => loadCliStatus(true));
+    $("wizard-provider").addEventListener("change", () => { renderKeyLink(); setStatus($("wizard-save-status"), "", null); });
+    $("wizard-save-form").addEventListener("submit", saveAndTest);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const t = event.target;
+      if (t && t.id === "wizard-key" && t.value) { t.value = ""; return; }  // first Esc clears the key
       event.preventDefault();
-      const input = $("wizard-key");
-      const status = $("wizard-save-status");
-      const provider = $("wizard-provider").value;
-      if (!input.value.trim()) { setStatus(status, "Paste a key first.", "result-error"); input.focus(); return; }
-      $("wizard-save").disabled = true;
-      try {
-        const data = await saveKey(provider, input);
-        state.wizardProvider = provider;
-        await loadKeys();
-        setStatus(status, data.message, data.applied ? "result-valid" : "result-network_error");
-        goStep(4);
-      } catch (err) {
-        setStatus(status, err.message, "result-error");
-      } finally {
-        $("wizard-save").disabled = false;
-      }
+      finishWizard(leaveTarget());
     });
-    $("wizard-test").addEventListener("click", async () => {
-      const provider = state.wizardProvider || $("wizard-provider").value;
-      await testKey(provider, $("wizard-test-status"), $("wizard-test"));
-    });
+    // The subscription states load in the background (the first check can take a few seconds).
+    loadCliStatus(false);
   }
 
   // ------------------------------------------------------------------ app settings

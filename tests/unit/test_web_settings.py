@@ -67,7 +67,7 @@ def test_settings_page_and_assets_are_served(client: TestClient) -> None:
     assert page.status_code == 200
     assert page.headers["content-type"].startswith("text/html")
     assert "default-src 'self'" in page.headers["content-security-policy"]
-    assert 'href="/settings?onboarding=1"' in page.text
+    assert 'href="/settings?onboarding=1&amp;from=settings"' in page.text
     assert client.get("/settings.js").headers["content-type"].startswith("text/javascript")
     assert client.get("/settings.css").headers["content-type"].startswith("text/css")
 
@@ -293,7 +293,8 @@ def test_onboarding_shows_when_no_key_is_set(client: TestClient) -> None:
     data = client.get("/api/onboarding").json()
     assert data["show"] is True
     assert data["any_key_set"] is False
-    assert data["subscription_mode"] == "coming_soon"
+    assert data["subscriptions"] == []  # make_deps registers no CLI provider
+    assert data["cli_checked"] is True
     urls = {p["name"]: p["key_page_url"] for p in data["providers"]}
     assert urls == {
         "anthropic": "https://platform.claude.com/settings/keys",

@@ -155,6 +155,11 @@ uv run llm-crossjury ui
 The UI opens at <http://127.0.0.1:8765/>. Use `--port` to pick another port and
 `--no-browser` to skip opening a browser tab.
 
+On first start, when no model is usable yet, a short setup opens: choose your
+subscriptions, API keys or both, follow the steps, and start with an example
+question. Reopen it any time from **Settings** (*Open setup wizard*). The **?** button
+on the home page replays a four-step tour.
+
 **Try it without keys:** `uv run llm-crossjury ui --demo` starts the same UI with
 simulated models and canned answers. It makes no network calls, costs nothing, and
 keeps all its state in a temporary folder.
@@ -182,7 +187,8 @@ folder, or as one-line key files (`.anthropic.key`, `.openai.key`, `.gemini.key`
    - **Grok Build (experimental):** `curl -fsSL https://x.ai/cli/install.sh | bash` or
      `irm https://x.ai/cli/install.ps1 | iex`, then run `grok` and sign in.
 2. In the UI, switch the model card to **Subscription**. If the CLI is not found yet,
-   open *Install and sign in* and click **Re-check**.
+   open *Install and sign in* and click **Re-check** (the setup wizard shows the same
+   commands for your system and a **Check again** button).
 3. Tick the consent box before running. Subscription calls count against your plan's
    usage limits, and their cost per call is unknown.
 
