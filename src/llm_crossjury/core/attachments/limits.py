@@ -35,6 +35,55 @@ SCANNED_PAGE_MIN_CHARS = 20
 scanned (no text layer)."""
 
 
+# --------------------------------------------------------------- derived images
+
+MAX_PAGE_IMAGES = 8
+"""PDF: at most this many pages are rendered as images (smart page images)."""
+
+MAX_DOCX_IMAGES = 8
+"""DOCX: at most this many embedded images are kept (in document order)."""
+
+PAGE_IMAGE_LONG_EDGE_PX = 1280
+"""Rendered PDF pages are scaled so that their long edge has this many pixels."""
+
+PAGE_IMAGE_JPEG_QUALITY = 85
+"""JPEG quality of a rendered page; PNG is used instead when it is smaller."""
+
+FIGURE_MIN_IMAGE_PX = 64
+"""A PDF image smaller than this (width or height, in source pixels) is ignored when
+looking for figure pages (icons, bullets, rules)."""
+
+FIGURE_FULL_COVERAGE = 0.25
+"""A PDF page whose images cover at least this share of the page area is a figure
+page, however much text it has."""
+
+FIGURE_MIN_COVERAGE = 0.03
+"""A PDF page whose images cover at least this share of the page area is a figure
+page when it also has little text (see :data:`FIGURE_PAGE_MAX_CHARS`). Smaller
+images (logos) are ignored."""
+
+FIGURE_PAGE_MAX_CHARS = 1500
+"""Low text density: fewer non-whitespace characters than this on a page."""
+
+MIN_EMBEDDED_IMAGE_BYTES = 2048
+"""DOCX: embedded images smaller than this are skipped (icons, bullets)."""
+
+MIN_EMBEDDED_IMAGE_PX = 32
+"""DOCX: embedded images narrower or lower than this are skipped."""
+
+MAX_DERIVED_IMAGE_BYTES = 5 * 1024 * 1024
+"""One derived image (page image or embedded image) may have at most 5 MB."""
+
+MAX_DERIVED_IMAGE_EDGE_PX = 8000
+"""Embedded images with an edge longer than this are skipped (vendor limit)."""
+
+MAX_DERIVED_BYTES_PER_FILE = 8 * 1024 * 1024
+"""All derived images of one file together may have at most 8 MB; later images are
+dropped with a warning. Derived images do not count toward :data:`MAX_TOTAL_BYTES`
+(the user's upload limit), but a member never receives more than
+:data:`MAX_TOTAL_BYTES` of binary attachment data in total (see ``prompt.py``)."""
+
+
 class AttachmentError(ValueError):
     """An attachment was rejected or could not be processed.
 

@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-11-08
 - Amended: 2026-11-08 (`cli` members may receive files natively)
+- Amended: 2026-11-08 (smart page images: derived PDF page images and DOCX images,
+  §11)
 - Amends: SPEC §9 non-goal "Input formats other than Markdown and LaTeX" (task
   attachments are now in scope; Document Review mode is unchanged). Contract change
   CI-5 (`providers/base.py`, `registry/schema.py`), approved by the maintainer.
@@ -35,7 +37,8 @@ Vendors differ (researched 2026-11-08 from official docs):
    - PDF: native on Anthropic, OpenAI and Gemini where declared. **xAI uses the
      locally extracted text** (no `attachment_search`), so every member sees comparable
      material and no retrieval fees apply.
-   - Word (DOCX): always converted locally to text (paragraphs and tables).
+   - Word (DOCX): always converted locally to text (paragraphs and tables); embedded
+     images go to image-capable members as derived images (§11, *amended 2026-11-08*).
    - `cli` (subscription) members follow the same rule, using the kinds their CLI
      adapter declares in `input_modalities` (*amended 2026-11-08*). Claude Code
      declares images and PDFs (where the registry entry lists them) and sends them
@@ -60,12 +63,46 @@ Vendors differ (researched 2026-11-08 from official docs):
 10. **Cost.** Input tokens for attachments come from the vendor's token-count endpoint
     where one exists (Anthropic, OpenAI, Gemini); otherwise from a conservative local
     heuristic (pages and image size). Unknown remains unknown, never zero.
+11. **Smart page images** (*amended 2026-11-08*). Some members read images but not PDFs
+    (the Codex CLI; xAI on the API, which uses PDF text per §3), and DOCX images were
+    lost for everyone. At upload time a PDF or DOCX therefore gets *derived images*:
+    ordinary `IMAGE` attachments (no contract change) kept next to the file in the
+    temporary store, with per-image metadata (source page or image number, size,
+    reason `scanned` / `figure` / `embedded`).
+    - **PDF page selection** (during extraction, in the isolated worker): pages with
+      almost no text (the scanned-page rule of §5) and *figure pages*, i.e. pages
+      whose raster images (image XObjects and inline images of at least 64 px, located
+      with pdfplumber) cover at least 25% of the page, or at least 3% while the page
+      has fewer than 1500 non-whitespace characters. Vector-only figures are not
+      detected. At most 8 pages per PDF, in page order (a warning lists the rest).
+    - **Rendering:** pypdfium2 (BSD/Apache) in a second isolated worker with the same
+      time limit, long edge 1280 px, PNG or JPEG (quality 85), whichever is smaller;
+      blank pages are skipped. A timeout or crash keeps the file without page images
+      and with a warning.
+    - **DOCX:** embedded PNG, JPEG, GIF and WebP images of the body, in document order;
+      icons (under 2 KB or 32 px), other formats (EMF, WMF, BMP, TIFF, ...) and
+      oversized images are skipped; at most 8. The text marks each kept image as
+      `[Image i of n]` where it appears.
+    - **Limits:** one derived image at most 5 MB, all derived images of a file at most
+      8 MB. They do not count toward the 20 MB upload limit, but no member receives
+      more than 20 MB of binary data: native files count first, then derived images
+      are added until the limit (the rest are left out with a warning).
+    - **Delivery rule** per member and attachment: native kind → the original only;
+      otherwise the text block, plus the derived images if the member reads images
+      (`text+images`); otherwise refused. It applies to Compare members and the
+      synthesis chair, on both backends. Derived images follow their file in the
+      attachment message, whose text lists them by generated name
+      (`report.pdf#page-3.png`, `notes.docx#image-2.png`). Results and estimates show
+      the mode and the image count; estimates add each image as a native image.
 
 ## Consequences
 
 - Members may see different representations of the same PDF (pages vs text); this is
   disclosed in the results.
-- Charts and images inside Word files are lost in v1.
+- Charts and images inside Word files reach image-capable members only, as derived
+  images (§11); text-only members see the `[Image i of n]` markers only.
+- Members that read images but not PDFs see figures and scans only on the selected
+  pages (§11); figures drawn as vectors on text-dense pages are not detected.
 - Larger prompts: attachments are often the dominant cost, so the estimate shows them
   per file.
 

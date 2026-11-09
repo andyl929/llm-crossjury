@@ -97,9 +97,11 @@ def test_docx_document_order_and_markdown() -> None:
     ]
 
 
-def test_docx_images_dropped_with_warning() -> None:
+def test_docx_tiny_image_skipped_with_warning() -> None:
     result = extract_docx(make_docx(with_image=True))
-    assert any("1 embedded image(s) were dropped" in w for w in result.warnings)
+    assert any("1 embedded image(s) were skipped" in w for w in result.warnings)
+    assert result.images == ()
+    assert "[Image" not in result.text
     assert "Closing paragraph" in result.text
 
 

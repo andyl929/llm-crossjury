@@ -62,7 +62,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from llm_crossjury.core.anonymize import scrub, scrub_enabled_for
 from llm_crossjury.core.attachments.build import AttachmentMeta, BuiltAttachment
 from llm_crossjury.core.attachments.prompt import (
+    add_derived_images,
+    attachment_metas,
     attachment_tokens,
+    derived_map,
     inline_attachments,
     prompt_attachment_tokens,
     receipts,
@@ -92,6 +95,7 @@ from llm_crossjury.core.cost.estimate import CallPlan, CostEstimate
 from llm_crossjury.core.cost.ledger import BudgetExceededError
 from llm_crossjury.core.cost.pricing import PricingError
 from llm_crossjury.core.providers.base import (
+    Attachment,
     Backend,
     CompletionRequest,
     CompletionResult,
@@ -351,8 +355,13 @@ class SynthesisPlan(_Frozen):
     """The step-1 attachments, sorted; only the chair receives them."""
 
     def attachment_metas(self) -> dict[str, AttachmentMeta]:
-        """Attachment id -> local metadata, for per-call token estimates."""
-        return {b.attachment.sha256: b.meta for b in self.attachments}
+        """Attachment id -> local metadata (derived images included), for per-call
+        token estimates."""
+        return attachment_metas(self.attachments)
+
+    def derived_images(self) -> dict[str, tuple[Attachment, ...]]:
+        """Attachment id -> its derived images (smart page images, ADR 0007)."""
+        return derived_map(self.attachments)
 
 
 def label_name(index: int) -> str:
@@ -752,6 +761,7 @@ def make_call_fn(
     backends: Mapping[str, Backend] | None = None,
     *,
     attachment_metas: Mapping[str, AttachmentMeta] | None = None,
+    derived_images: Mapping[str, Sequence[Attachment]] | None = None,
 ) -> CallFn:
     """Build the :data:`CallFn` the stages use.
 
@@ -764,7 +774,9 @@ def make_call_fn(
 
     Attachments in a spec's prompt (the chair's, ADR 0007) are inlined as text for a
     ``cli`` call (its adapter ignores ``Message.attachments``) and counted with
-    ``attachment_metas`` in the call's budget estimate.
+    ``attachment_metas`` in the call's budget estimate. A model that reads images but
+    not a file's kind also gets the file's ``derived_images`` (smart page images),
+    on both backends.
 
     Raises (from the returned function):
         ProviderUnavailableError: the provider's key is not set (``api``), or the
@@ -776,6 +788,7 @@ def make_call_fn(
     """
     chosen = dict(backends or {})
     metas = dict(attachment_metas or {})
+    derived = dict(derived_images or {})
 
     async def call(spec: CallSpec) -> CompletionResult:
         backend = chosen.get(spec.provider, Backend.API)
@@ -790,11 +803,9 @@ def make_call_fn(
         )
         price = checked_price(spec.provider, resolved.model_id, backend, deps)
         caps = deps.providers[(spec.provider, backend)].capabilities(resolved.model_id)
-        prompt = (
-            inline_attachments(spec.prompt, caps.input_modalities)
-            if backend is Backend.CLI
-            else spec.prompt
-        )
+        prompt = add_derived_images(spec.prompt, derived, caps.input_modalities)
+        if backend is Backend.CLI:
+            prompt = inline_attachments(prompt, caps.input_modalities)
         entry = deps.registry.get(spec.provider, resolved.model_id)
         if entry is not None and entry.max_output and spec.max_output_tokens > entry.max_output:
             spec = replace(spec, max_output_tokens=entry.max_output)
@@ -968,7 +979,12 @@ async def run_finish_step(req: FinishRequest, deps: CompareDeps) -> FinishStepRe
     run_id = req.run_id or new_run_id()
     records: list[CallCost] = []
     call = make_call_fn(
-        run_id, deps, records, plan.backends, attachment_metas=plan.attachment_metas()
+        run_id,
+        deps,
+        records,
+        plan.backends,
+        attachment_metas=plan.attachment_metas(),
+        derived_images=plan.derived_images(),
     )
     reviews: ReviewOutcome | None = None
     if with_reviews:
@@ -1063,7 +1079,12 @@ async def run_resynthesis(req: ResynthesisRequest, deps: CompareDeps) -> Resynth
             reviews=req.reviews,
             extra_instructions=plan.extra_instructions,
             call=make_call_fn(
-                run_id, deps, records, plan.backends, attachment_metas=plan.attachment_metas()
+                run_id,
+                deps,
+                records,
+                plan.backends,
+                attachment_metas=plan.attachment_metas(),
+                derived_images=plan.derived_images(),
             ),
             previous=req.previous,
             rulings=req.rulings,

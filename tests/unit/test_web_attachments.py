@@ -20,7 +20,14 @@ from llm_crossjury.core.providers.mock import MockProvider
 from llm_crossjury.web import attachments_api, create_app
 from llm_crossjury.web.attachments_api import UPLOAD_HEADER
 from tests.unit._attachment_fakes import SECRET_TEXT, caps
-from tests.unit._attachment_files import make_docx, make_pdf, make_png, text_stream
+from tests.unit._attachment_files import (
+    SCAN,
+    make_docx,
+    make_image_pdf,
+    make_pdf,
+    make_png,
+    text_stream,
+)
 from tests.unit._compare_fakes import make_deps
 from tests.unit._synthesis_fakes import FakeStages
 
@@ -55,7 +62,7 @@ def _upload(client: TestClient, *files: tuple[str, bytes, str], **kwargs: Any) -
     )
 
 
-PDF = make_pdf([text_stream(["Hello from the PDF."])])
+PDF = make_pdf([text_stream(["Hello from the PDF, with a real text layer."])])
 
 
 # --------------------------------------------------------------------------- upload
@@ -333,3 +340,18 @@ def test_page_offers_attachments_with_the_upload_header() -> None:
     assert UPLOAD_HEADER.lower() in script.lower()
     assert "These files will be sent to: " in script
     assert "attachment_ids" in script
+
+
+def test_upload_reports_page_images_and_estimate_shows_text_plus_images(
+    store: AttachmentStore,
+) -> None:
+    pdf = make_image_pdf([(["A page of ordinary text, long enough."], None), ([], SCAN)])
+    providers = {"xai": NoCounter("xai", lambda r: "seen", caps(AttachmentKind.IMAGE))}
+    client = _client(_deps(store, providers=providers))
+    (info,) = _upload(client, ("scan.pdf", pdf, "application/pdf")).json()["attachments"]
+    assert [(d["page"], d["reason"], d["filename"]) for d in info["derived"]] == [
+        (2, "scanned", "scan.pdf#page-2.png")
+    ]
+    body = {"task": TASK, "selections": [_selection("xai")], "attachment_ids": [info["id"]]}
+    (line,) = client.post("/api/estimate", json=body).json()["attachments"]
+    assert (line["mode"], line["images"], line["kind"]) == ("text+images", 1, "pdf")

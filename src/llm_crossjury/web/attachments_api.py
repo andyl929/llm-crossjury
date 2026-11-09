@@ -36,6 +36,7 @@ from llm_crossjury.core.attachments import (
     build_attachment,
     sanitize_filename,
 )
+from llm_crossjury.core.attachments.build import DerivedImageMeta
 from llm_crossjury.core.attachments.store import AttachmentNotFoundError
 from llm_crossjury.core.compare_service import MAX_ATTACHMENTS, AttachmentStoreLike
 from llm_crossjury.core.providers.base import AttachmentKind
@@ -69,6 +70,9 @@ class AttachmentInfo(BaseModel):
     warnings: tuple[str, ...]
     text_tokens: int | None
     """Local token estimate of the extracted text (``None`` for images)."""
+    derived: tuple[DerivedImageMeta, ...] = ()
+    """Images derived from the file (rendered PDF pages, DOCX images) for members
+    that read images but not the file itself."""
 
 
 class UploadResponse(BaseModel):
@@ -102,6 +106,7 @@ def attachment_info(built: BuiltAttachment) -> AttachmentInfo:
         image_height=height,
         warnings=meta.warnings,
         text_tokens=meta.text_tokens,
+        derived=meta.derived,
     )
 
 
