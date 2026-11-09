@@ -13,6 +13,11 @@ Usage::
     uv run python scripts/smoke_cli.py --live --provider claude --model <model-id>
     uv run python scripts/smoke_cli.py --live --provider claude --model <model-id> --schema
     uv run python scripts/smoke_cli.py --live --provider claude --check-only
+    uv run python scripts/smoke_cli.py --live --provider claude --model <model-id> \\
+        --attach tiny.png --question "What colour is this image? One word."
+
+``--attach`` sends one image or PDF the way a Compare run does (ADR 0007): natively
+when the model's capabilities declare its kind, otherwise as extracted text.
 """
 
 from __future__ import annotations
@@ -23,7 +28,10 @@ import sys
 import time
 from pathlib import Path
 
+from llm_crossjury.core.attachments import build_attachment
+from llm_crossjury.core.attachments.prompt import with_attachments
 from llm_crossjury.core.providers.base import (
+    Attachment,
     CompletionRequest,
     Message,
     Prompt,
@@ -47,6 +55,8 @@ PROVIDERS: dict[str, type[CliProviderBase]] = {
     "grok": GrokCliProvider,
 }
 
+DEFAULT_QUESTION = "Reply with the word: pong"
+
 SCHEMA = {
     "type": "object",
     "properties": {"answer": {"type": "string"}},
@@ -55,13 +65,23 @@ SCHEMA = {
 }
 
 
-def _request(model: str, *, schema: bool, reasoning: ReasoningEffort) -> CompletionRequest:
+def _request(
+    model: str,
+    *,
+    schema: bool,
+    reasoning: ReasoningEffort,
+    attachment: Attachment | None = None,
+    question: str = DEFAULT_QUESTION,
+) -> CompletionRequest:
+    prompt = Prompt(
+        stable_prefix=(Message(role=Role.SYSTEM, content="You answer in one short line."),),
+        variable_suffix=(Message(role=Role.USER, content=question),),
+    )
+    if attachment is not None:
+        prompt = with_attachments(prompt, [attachment])
     return CompletionRequest(
         model=model,
-        prompt=Prompt(
-            stable_prefix=(Message(role=Role.SYSTEM, content="You answer in one short line."),),
-            variable_suffix=(Message(role=Role.USER, content="Reply with the word: pong"),),
-        ),
+        prompt=prompt,
         response_schema=SCHEMA if schema else None,
         temperature=None,
         max_output_tokens=None,
@@ -88,7 +108,18 @@ async def _run(args: argparse.Namespace) -> int:
     if args.check_only or not status.available:
         return 0 if status.available else 1
 
-    request = _request(args.model, schema=args.schema, reasoning=ReasoningEffort(args.reasoning))
+    attachment = None
+    if args.attach:
+        path = Path(args.attach)
+        attachment = build_attachment(path.name, path.read_bytes()).attachment
+        print(f"attachment: {attachment.filename} ({attachment.kind}, {len(attachment.data)} B)")
+    request = _request(
+        args.model,
+        schema=args.schema,
+        reasoning=ReasoningEffort(args.reasoning),
+        attachment=attachment,
+        question=args.question or DEFAULT_QUESTION,
+    )
     caps = provider.capabilities(args.model)
     print(f"capabilities: {caps.model_dump()}")
     if not args.yes:
@@ -125,6 +156,8 @@ def main() -> None:
         "--reasoning", choices=[e.value for e in ReasoningEffort], default="default"
     )
     parser.add_argument("--schema", action="store_true", help="Request a tiny JSON schema.")
+    parser.add_argument("--attach", help="Path of one image or PDF to attach.")
+    parser.add_argument("--question", help="The user question (default: a fixed tiny prompt).")
     parser.add_argument("--check-only", action="store_true", help="Only run the version check.")
     parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
     args = parser.parse_args()
