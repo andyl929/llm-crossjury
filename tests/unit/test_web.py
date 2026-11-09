@@ -145,7 +145,7 @@ def test_providers_list_usable_models_and_budget() -> None:
     assert [m["id"] for m in openai["models"]] == ["openai-model"]  # unpriced one hidden
     assert openai["models"][0]["aliases"] == ["balanced"]
     assert openai["default_model"] == "openai-model"
-    assert data["default_max_output_tokens"] == 4096
+    assert data["default_max_output_tokens"] == 32_000
     assert data["budget"] == {
         "currency": "USD",
         "run_limit": "1.00",

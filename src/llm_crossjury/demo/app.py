@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable, Sequence
+from decimal import Decimal
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -118,7 +119,11 @@ def build_demo_deps(data_dir: Path, *, latency_scale: float = 1.0) -> CompareDep
     data_dir.mkdir(parents=True, exist_ok=True)
     registry = ModelRegistry.load(shipped_registry_path())
     pricing = PricingTable(registry)
-    budget = BudgetConfig()
+    # Demo spend is simulated: generous limits so no confirmation or refusal interrupts
+    # the walkthrough (the real defaults still apply to normal runs).
+    budget = BudgetConfig(
+        run_limit=Decimal("100"), confirm_above=Decimal("100"), daily_limit=Decimal("1000")
+    )
     estimator = CostEstimator(
         pricing,
         cache_hit_rate=0.0,

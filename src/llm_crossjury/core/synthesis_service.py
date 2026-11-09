@@ -88,6 +88,7 @@ from llm_crossjury.core.compare_service import (
     load_attachments,
     new_run_id,
     provider_names,
+    reasoning_within_cap,
     require_consent,
 )
 from llm_crossjury.core.config import RolesConfig
@@ -593,7 +594,9 @@ def _resolve(
     )
 
 
-def _call_plan(planned: PlannedCall, resolved: ResolvedModel) -> CallPlan:
+def _call_plan(
+    planned: PlannedCall, resolved: ResolvedModel, *, high_is_cap: bool = False
+) -> CallPlan:
     return CallPlan(
         stage=planned.stage,
         provider=planned.provider,
@@ -607,6 +610,10 @@ def _call_plan(planned: PlannedCall, resolved: ResolvedModel) -> CallPlan:
         expected_output_tokens_low=planned.output_tokens_low,
         expected_output_tokens_high=planned.output_tokens_high,
         batched=False,
+        # Only when the high bound is the call's real output cap (the per-call budget
+        # check); stage estimates use heuristic highs below the cap.
+        output_cap_includes_reasoning=high_is_cap
+        and reasoning_within_cap(planned.provider, resolved.backend),
     )
 
 
@@ -826,7 +833,7 @@ def make_call_fn(
                 output_tokens_low=spec.max_output_tokens,
                 output_tokens_high=spec.max_output_tokens,
             )
-            plan = _call_plan(planned, resolved)
+            plan = _call_plan(planned, resolved, high_is_cap=True)
             call_high = deps.estimator.estimate([plan], [resolved]).total_high
         tags = {"stage": spec.stage}
         if spec.tag:

@@ -331,7 +331,9 @@ def make_deps(
     ``providers`` are keyed by name and registered on the ``api`` backend;
     ``cli_providers`` (default: none) on the ``cli`` backend.
     """
-    models = [make_entry(p, f"{p}-model", max_output=8192) for p in PROVIDERS]
+    # max_output 4096: the generous default cap (32000) is clamped to it, so amounts stay
+    # easy to reason about (high = 4096 output tokens).
+    models = [make_entry(p, f"{p}-model", max_output=4096) for p in PROVIDERS]
     models += [make_entry(p, f"{p}-unpriced") for p in PROVIDERS]
     models += [make_entry(p, f"{p}-cli", backends=(Backend.CLI,)) for p in CLI_PROVIDERS]
     models += extra_models or []

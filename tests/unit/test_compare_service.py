@@ -60,9 +60,13 @@ def _all(model: str = "balanced") -> list[Selection]:
 # --------------------------------------------------------------------------- selection
 
 
+FAKE_MODEL_MAX_OUTPUT = 4096
+"""``max_output`` of the fake registry's priced models (see ``_compare_fakes``)."""
+
+
 def test_selection_defaults() -> None:
     sel = Selection(provider="openai", model="balanced")
-    assert sel.max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS == 4096
+    assert sel.max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS == 32_000
     assert sel.temperature is None
 
 
@@ -77,16 +81,19 @@ def test_selection_defaults() -> None:
             [Selection(provider="openai", model="balanced")] * 2,
             "more than once",
         ),
-        (
-            "task",
-            [Selection(provider="openai", model="balanced", max_output_tokens=9000)],
-            "exceeds the model limit",
-        ),
     ],
 )
 def test_invalid_selections(task: str, selections: list[Selection], message: str) -> None:
     with pytest.raises(SelectionError, match=message):
         prepare_calls(task, selections, make_deps())
+
+
+def test_output_cap_is_clamped_to_the_model_limit() -> None:
+    (call,) = prepare_calls(
+        TASK, [Selection(provider="openai", model="balanced", max_output_tokens=9000)], make_deps()
+    )
+    assert call.request.max_output_tokens == 4096  # the fake model's max_output
+    assert call.selection.max_output_tokens == 4096
 
 
 def test_unpriced_model_is_refused() -> None:
@@ -115,9 +122,10 @@ def test_prepared_calls_share_prefix_and_resolve_aliases() -> None:
     assert fingerprints == {prefix_fingerprint(calls[0].request.prompt)}
     for call in calls:
         assert call.request.reasoning is ReasoningEffort.DEFAULT
-        assert call.request.max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS
-        assert call.plan.expected_output_tokens_high == DEFAULT_MAX_OUTPUT_TOKENS
-        assert call.plan.expected_output_tokens_low < DEFAULT_MAX_OUTPUT_TOKENS
+        # The default cap is clamped to the fake models' max_output.
+        assert call.request.max_output_tokens == FAKE_MODEL_MAX_OUTPUT
+        assert call.plan.expected_output_tokens_high == FAKE_MODEL_MAX_OUTPUT
+        assert call.plan.expected_output_tokens_low < FAKE_MODEL_MAX_OUTPUT
 
 
 def test_fingerprint_ignores_suffix() -> None:
@@ -149,7 +157,7 @@ def test_key_is_set_reports_presence_only(monkeypatch: pytest.MonkeyPatch) -> No
 def test_estimate_and_budget_status() -> None:
     deps = make_deps()
     estimate = asyncio.run(estimate_compare(TASK, _all(), deps))
-    expected_high = 4 * DEFAULT_MAX_OUTPUT_TOKENS * PER_OUTPUT_TOKEN
+    expected_high = 4 * FAKE_MODEL_MAX_OUTPUT * PER_OUTPUT_TOKEN
     assert estimate.total_high == expected_high
     status = budget_status(estimate, deps)
     assert not status.refused
@@ -189,7 +197,7 @@ def test_run_all_members_succeed() -> None:
     assert {e.run_id for e in ledger.entries} == {result.run_id}
     assert all(e.stage == "answer" and e.cost == FIXED_CALL_COST for e in ledger.entries)
     assert ledger.reservations == {}
-    assert ledger.checks == [DEFAULT_MAX_OUTPUT_TOKENS * PER_OUTPUT_TOKEN] * 4
+    assert ledger.checks == [FAKE_MODEL_MAX_OUTPUT * PER_OUTPUT_TOKEN] * 4
 
 
 def test_members_run_concurrently() -> None:

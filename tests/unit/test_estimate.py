@@ -205,3 +205,19 @@ def test_resolutions_are_carried(pricing: PricingTable) -> None:
     est = CostEstimator(pricing, 0.5, GLOBAL).estimate([_call()], [resolved])
     assert est.resolved == (resolved,)
     assert est.resolved[0].native_params == {"effort": "h", "x": {"y": 1}}
+
+
+def test_reasoning_inside_the_output_cap(pricing: PricingTable) -> None:
+    # One call: 1M input at 1/M (1.00), output cap 0.2M at 4/M. Without the flag the high
+    # bound adds reasoning on top (0.2M + 0.2M); with it, the cap holds both.
+    estimator = CostEstimator(pricing, 0.0, GLOBAL, currency="USD")
+    separate = estimator.estimate([_call()], []).lines[0]
+    within = estimator.estimate(
+        [_call().model_copy(update={"output_cap_includes_reasoning": True})], []
+    )
+    line = within.lines[0]
+    assert separate.cost_high == Decimal("1") + Decimal("1.6")
+    assert line.output_tokens_high + line.reasoning_tokens_high == M // 5
+    assert line.cost_high == Decimal("1") + Decimal("0.8")
+    # The low bound (0.1M visible + 0.1M reasoning) already fits the cap: unchanged.
+    assert line.cost_low == separate.cost_low

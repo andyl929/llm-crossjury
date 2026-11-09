@@ -100,8 +100,26 @@ PROVIDER_NAMES: tuple[str, ...] = ("anthropic", "openai", "gemini", "xai")
 ALIAS_NAMES: tuple[str, ...] = ("fast", "balanced", "best")
 """Portable alias names (SPEC glossary)."""
 
-DEFAULT_MAX_OUTPUT_TOKENS = 4096
-"""Product setting (not a model fact): default output cap per member call."""
+DEFAULT_MAX_OUTPUT_TOKENS = 32_000
+"""Product setting (not a model fact): default output cap per member call. Research and
+development answers are long, and reasoning models spend part of the cap on hidden
+reasoning (Google recommends at least 32,768 for Gemini 4 Argon), so the default is
+generous; it is clamped to the model's registry ``max_output`` and can be lowered per
+card in the UI."""
+
+REASONING_WITHIN_OUTPUT_CAP: frozenset[str] = frozenset({"anthropic", "openai", "gemini"})
+"""API vendors whose output cap counts hidden reasoning tokens too, so visible plus
+reasoning output never exceeds ``max_output_tokens`` (the estimate's worst case is the
+cap itself). Anthropic: ``max_tokens`` includes thinking. OpenAI: ``max_output_tokens``
+includes reasoning tokens. Gemini: ``max_output_tokens`` includes thought tokens
+(https://ai.google.dev/gemini-api/docs/thinking). xAI is excluded: its cap covers only
+the visible answer (https://docs.x.ai/developers/model-capabilities/text/best-practices)."""
+
+
+def reasoning_within_cap(provider: str, backend: Backend) -> bool:
+    """Whether ``provider`` on ``backend`` counts reasoning inside the output cap."""
+    return backend is Backend.API and provider in REASONING_WITHIN_OUTPUT_CAP
+
 
 DEFAULT_TIMEOUT_S = 900.0
 """Product setting: per-call timeout so a hung vendor call cannot block the run."""
@@ -761,10 +779,9 @@ def prepare_calls(
         entry = deps.registry.get(sel.provider, resolved.model_id)
         limit = entry.max_output if entry is not None else None
         if limit is not None and sel.max_output_tokens > limit:
-            raise SelectionError(
-                f"{sel.provider}/{resolved.model_id}: max output tokens "
-                f"{sel.max_output_tokens} exceeds the model limit {limit}."
-            )
+            # Clamp rather than refuse: the generous default (or a large typed value)
+            # simply becomes the model's own maximum.
+            sel = sel.model_copy(update={"max_output_tokens": limit})  # noqa: PLW2901
         prompt, member_receipts, tokens_by_id, refusal = _member_prompt(
             base_prompt, shared_prompt, built, sel, resolved, deps
         )
@@ -792,6 +809,7 @@ def prepare_calls(
             expected_output_tokens_low=max(1, sel.max_output_tokens // ESTIMATE_LOW_OUTPUT_DIVISOR),
             expected_output_tokens_high=sel.max_output_tokens,
             batched=False,
+            output_cap_includes_reasoning=reasoning_within_cap(sel.provider, sel.backend),
         )
         prepared.append(
             PreparedCall(

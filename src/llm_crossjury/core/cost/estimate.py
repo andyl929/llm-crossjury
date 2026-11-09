@@ -130,6 +130,10 @@ class CallPlan(BaseModel):
     expected_output_tokens_low: int
     expected_output_tokens_high: int
     batched: bool
+    output_cap_includes_reasoning: bool = False
+    """``True`` when ``expected_output_tokens_high`` is the call's hard output cap and the
+    vendor counts reasoning tokens inside that cap (so visible plus reasoning output can
+    never exceed it). ``False``: reasoning is estimated on top of the visible output."""
 
 
 _LineKey = tuple[str, str, str, Backend, ReasoningEffort, bool]
@@ -270,14 +274,13 @@ class CostEstimator:
             multiplier_notes[
                 f"{call.provider}/{call.model} at '{call.reasoning}': x{mult:g} ({source})"
             ] = None
-            r_low = math.ceil(call.expected_output_tokens_low * mult)
-            r_high = math.ceil(call.expected_output_tokens_high * mult)
+            out_low, r_low, out_high, r_high = _output_bounds(call, mult)
 
             line.calls += 1
             line.input_tokens += total_in
             line.cached += cached
-            line.out_low += call.expected_output_tokens_low
-            line.out_high += call.expected_output_tokens_high
+            line.out_low += out_low
+            line.out_high += out_high
             line.reasoning_low += r_low
             line.reasoning_high += r_high
 
@@ -300,16 +303,14 @@ class CostEstimator:
                         total_in - written - cached,
                         cached,
                         written,
-                        call.expected_output_tokens_low,
+                        out_low,
                         r_low,
                     ),
                     price,
                     batched=call.batched,
                 )
                 high = compute_cost(
-                    _usage(
-                        total_in - written, 0, written, call.expected_output_tokens_high, r_high
-                    ),
+                    _usage(total_in - written, 0, written, out_high, r_high),
                     price,
                     batched=call.batched,
                 )
@@ -390,3 +391,27 @@ def _add(total: Decimal | None, amount: Decimal | None) -> Decimal | None:
     if total is None or amount is None:
         return None
     return total + amount
+
+
+def _split_within_cap(visible: int, reasoning: int, *, cap: int, mult: float) -> tuple[int, int]:
+    """Fit visible + reasoning output into ``cap``, keeping their ratio (1 : ``mult``)."""
+    if visible + reasoning <= cap:
+        return visible, reasoning
+    shown = math.ceil(cap / (1 + mult)) if mult > 0 else cap
+    return shown, max(0, cap - shown)
+
+
+def _output_bounds(call: CallPlan, mult: float) -> tuple[int, int, int, int]:
+    """Return ``(visible_low, reasoning_low, visible_high, reasoning_high)`` for ``call``.
+
+    Reasoning is ``visible x mult``; when the vendor counts reasoning inside the output
+    cap, visible plus reasoning is fitted into ``expected_output_tokens_high``.
+    """
+    out_low, out_high = call.expected_output_tokens_low, call.expected_output_tokens_high
+    r_low = math.ceil(out_low * mult)
+    r_high = math.ceil(out_high * mult)
+    if call.output_cap_includes_reasoning:
+        cap = out_high
+        out_low, r_low = _split_within_cap(out_low, r_low, cap=cap, mult=mult)
+        out_high, r_high = _split_within_cap(out_high, r_high, cap=cap, mult=mult)
+    return out_low, r_low, out_high, r_high
