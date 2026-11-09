@@ -268,7 +268,9 @@ def create_chat_router(  # noqa: PLR0915 - the routes share the closure state
         app_settings = settings()
         d = deps_with_settings(deps(), app_settings)
         try:
-            prepared = prepare_chat(found, body, d, settings=app_settings, index=memory_index)
+            prepared = prepare_chat(
+                found, body, d, settings=app_settings, index=memory_index, allow_empty=True
+            )
         except Exception as exc:
             response = _service_error(exc)
             if response is None:

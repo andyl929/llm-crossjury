@@ -124,9 +124,9 @@ def test_estimate_errors(harness: Harness) -> None:
     r = harness.client.post("/api/chat/estimate?session=NOT-AN-ID", json=_body())
     assert r.status_code == 400
     assert r.json()["code"] == "invalid_id"
+    # A blank message is fine for an estimate (the meter shows the context alone).
     r = harness.client.post(f"/api/chat/estimate?session={sid}", json=_body(message=" "))
-    assert r.status_code == 400
-    assert r.json()["code"] == "invalid_selection"
+    assert r.status_code == 200
     r = harness.client.post(
         f"/api/chat/estimate?session={sid}", json=_body(attachment_ids=["a" * 64])
     )

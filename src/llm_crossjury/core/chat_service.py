@@ -169,8 +169,10 @@ def deps_with_settings(deps: CompareDeps, settings: AppSettings) -> CompareDeps:
     return replace(deps, budget=budget)
 
 
-def _validate(session: Session, req: ChatRequest, deps: CompareDeps) -> None:
-    if not req.message.strip():
+def _validate(
+    session: Session, req: ChatRequest, deps: CompareDeps, *, allow_empty: bool = False
+) -> None:
+    if not allow_empty and not req.message.strip():
         raise SelectionError("The message is empty.")
     ref = req.model
     if ref.provider not in provider_names(deps):
@@ -218,6 +220,7 @@ def prepare_chat(
     settings: AppSettings,
     index: MemoryIndex | None = None,
     exclude_turn_id: str | None = None,
+    allow_empty: bool = False,
 ) -> PreparedChat:
     """Validate, resolve, price and build the context of one chat message.
 
@@ -228,16 +231,18 @@ def prepare_chat(
         settings: App settings (context budget).
         index: Memory search index.
         exclude_turn_id: The pending turn being answered.
+        allow_empty: Accept an empty message (an estimate of the context alone, for
+            the meter shown before anything is typed).
 
     Raises:
-        SelectionError: empty message, unknown provider/backend or continuation, a
-            ``cli`` model without ``cli_flags``, a file the model cannot receive, or a
-            context that cannot fit.
+        SelectionError: empty message (unless ``allow_empty``), unknown
+            provider/backend or continuation, a ``cli`` model without ``cli_flags``, a
+            file the model cannot receive, or a context that cannot fit.
         ResolutionError: the model cannot be resolved.
         PricingError: an ``api`` model without a verified price.
         AttachmentError: an attachment id is unknown or too large.
     """
-    _validate(session, req, deps)
+    _validate(session, req, deps, allow_empty=allow_empty)
     ref = req.model
     resolved = deps.resolver.resolve(
         member_id=CHAT_STAGE,

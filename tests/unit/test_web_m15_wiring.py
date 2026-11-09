@@ -49,3 +49,16 @@ def test_deleting_a_session_drops_its_memory_rows(tmp_path: Path) -> None:
     assert index.search(sid, "quokka", 3)
     assert env.client.delete(f"/api/sessions/{sid}").json() == {"deleted": True}
     assert not index.search(sid, "quokka", 3)
+
+
+def test_estimate_accepts_an_empty_message_but_send_does_not(tmp_path: Path) -> None:
+    env = Env(tmp_path)
+    sid = env.new_session()
+    body = {"message": "", "model": {"provider": "anthropic", "model": "balanced"}}
+    estimate = env.client.post(f"/api/chat/estimate?session={sid}", json=body)
+    assert estimate.status_code == 200, estimate.text
+    assert estimate.json()["context_tokens"] >= 0
+    sent = env.client.post(f"/api/chat?session={sid}&turn={new_id()}", json=body)
+    assert sent.status_code == 400
+    assert sent.json()["code"] == "invalid_selection"
+    assert env.session(sid)["turns"] == []
