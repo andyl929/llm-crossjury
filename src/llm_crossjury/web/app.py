@@ -85,6 +85,8 @@ from llm_crossjury.core.compare_service import (
 from llm_crossjury.core.config import BudgetConfig
 from llm_crossjury.core.cost.estimate import CostEstimate
 from llm_crossjury.core.cost.pricing import PricingError
+from llm_crossjury.core.memory.case_file import make_case_file_builder
+from llm_crossjury.core.memory.index import MemoryIndex, open_index
 from llm_crossjury.core.providers.base import Backend, ProviderStatus
 from llm_crossjury.core.registry.resolver import ResolutionError
 from llm_crossjury.core.sessions.interfaces import CaseFileBuilder, TaskRunnerLike
@@ -108,6 +110,7 @@ from llm_crossjury.core.synthesis_service import (
 )
 from llm_crossjury.web import session_hooks as hooks
 from llm_crossjury.web.attachments_api import UPLOAD_PATH, create_attachments_router
+from llm_crossjury.web.chat_api import create_chat_router
 from llm_crossjury.web.session_hooks import AppContext
 from llm_crossjury.web.sessions_api import create_sessions_router
 from llm_crossjury.web.settings_api import KeyTester, create_settings_router
@@ -821,6 +824,17 @@ def _default_sessions_root() -> Path | None:
         return None  # an unusable data dir: sessions stay in memory
 
 
+MEMORY_INDEX_NAME = "index.sqlite3"
+"""The session memory index (FTS5), next to the session files."""
+
+
+def _memory_index(sessions: SessionStore) -> MemoryIndex:
+    """The FTS index beside the session files; in memory when history is not saved."""
+    if sessions.persist and sessions.root is not None:
+        return open_index(sessions.root / MEMORY_INDEX_NAME)
+    return open_index(None)
+
+
 def create_app(
     deps_factory: DepsFactory,
     *,
@@ -913,6 +927,16 @@ def create_app(
         case_file_builder=case_file_builder,
     )
     app.state.crossjury = ctx
+    memory_index = _memory_index(sessions)
+    app.state.crossjury_memory_index = memory_index
+    if ctx.case_file_builder is None:
+        ctx.case_file_builder = make_case_file_builder(memory_index)
+
+    def forget(session_id: str | None) -> None:
+        if session_id is None:
+            memory_index.delete_all()
+        else:
+            memory_index.delete_session(session_id)
 
     files = _static_files()
     _add_guard(app, hosts)
@@ -932,7 +956,12 @@ def create_app(
         )
     )
     app.include_router(
-        create_sessions_router(store=sessions, settings=settings, allowed_hosts=allowed_hosts)
+        create_sessions_router(
+            store=sessions, settings=settings, allowed_hosts=allowed_hosts, on_delete=forget
+        )
+    )
+    app.include_router(
+        create_chat_router(deps, sessions, ctx.tasks, settings.get, None, index=memory_index)
     )
     for factory in extra_routers:
         app.include_router(factory(ctx))

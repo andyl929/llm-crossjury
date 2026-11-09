@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -105,6 +105,7 @@ def create_sessions_router(
     store: SessionStoreLike,
     settings: AppSettingsStore,
     allowed_hosts: Sequence[str] = DEFAULT_ALLOWED_HOSTS,
+    on_delete: Callable[[str | None], None] | None = None,
 ) -> APIRouter:
     """Create the sessions and app-settings router.
 
@@ -113,6 +114,8 @@ def create_sessions_router(
         settings: The app settings store; saving notifies its listeners (the app
             switches session persistence there).
         allowed_hosts: Accepted ``Host`` names (without port); ``"*"`` accepts any.
+        on_delete: Called after a session is deleted with its id, or with ``None``
+            after all sessions are deleted (the app drops their memory index rows).
     """
     hosts = frozenset(h.strip("[]").lower() for h in allowed_hosts)
     router = APIRouter()
@@ -135,6 +138,8 @@ def create_sessions_router(
         if (refused := check_request(request, hosts)) is not None:
             return refused
         count = await asyncio.to_thread(store.delete_all)
+        if on_delete is not None:
+            on_delete(None)
         return JSONResponse(content={"deleted": count})
 
     @router.get("/api/sessions/{session_id}", response_model=None)
@@ -187,7 +192,10 @@ def create_sessions_router(
             return refused
         if not is_session_id(session_id):
             return invalid_session_id()
-        return JSONResponse(content={"deleted": store.delete(session_id)})
+        deleted = store.delete(session_id)
+        if on_delete is not None:
+            on_delete(session_id)
+        return JSONResponse(content={"deleted": deleted})
 
     @router.get("/api/settings/app", response_model=None)
     async def get_app_settings(request: Request) -> JSONResponse:
