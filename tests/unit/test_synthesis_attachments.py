@@ -218,6 +218,29 @@ def test_cli_chair_gets_inlined_text(stages: FakeStages) -> None:
         assert fallback_block(item.attachment) in files.content
 
 
+def test_cli_chair_with_image_support_gets_the_image_natively(stages: FakeStages) -> None:
+    store = MemoryStore()
+    ids = store.add(PNG, DOCX)
+    cli = FakeCliProvider(
+        "anthropic", responder=_responder, capabilities=caps(AttachmentKind.IMAGE)
+    )
+    deps = _deps(store, providers={"openai": _provider("openai")}, cli_providers={"anthropic": cli})
+    req = FinishRequest(
+        task=TASK,
+        answers=_answers(Backend.CLI),
+        seed=1,
+        chair=ModelChoice(provider="anthropic", model_id="anthropic-cli"),
+        attachment_ids=tuple(ids),
+        allow_unknown_cost=True,
+        skip_review=True,
+    )
+    asyncio.run(run_finish_step(req, deps))
+    (request,) = _chair_requests(cli)
+    files = request.prompt.stable_prefix[1]
+    assert files.attachments == (PNG.attachment,)
+    assert fallback_block(DOCX.attachment) in files.content
+
+
 @pytest.mark.parametrize("backend", [Backend.CLI, Backend.API])
 def test_chair_that_cannot_read_an_image_is_refused(stages: FakeStages, backend: Backend) -> None:
     store = MemoryStore()

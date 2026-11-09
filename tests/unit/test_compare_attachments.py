@@ -203,11 +203,60 @@ def test_cli_member_refuses_images_and_others_continue() -> None:
         ],
     )
     by = {m.provider: m for m in result.members}
-    assert "Subscription (CLI)" in (by["anthropic"].error or "")
+    assert "subscription (CLI)" in (by["anthropic"].error or "")
     assert "chart.png" in (by["anthropic"].error or "")
     assert cli.requests == []
     assert by["gemini"].error is None
     assert by["gemini"].text == "gemini answer"
+
+
+def test_cli_member_with_native_support_keeps_images_and_pdfs() -> None:
+    store, ids = _store(PDF, DOCX, PNG)
+    cli = FakeCliProvider("anthropic", capabilities=caps(AttachmentKind.IMAGE, AttachmentKind.PDF))
+    deps = _deps(store, cli_providers={"anthropic": cli})
+    result = _run(
+        deps, ids, [Selection(provider="anthropic", backend=Backend.CLI, model="anthropic-cli")]
+    )
+    member = result.members[0]
+    assert member.error is None
+    assert {r.filename: r.mode for r in member.attachments} == {
+        "report.pdf": "native",
+        "notes.docx": "text",
+        "chart.png": "native",
+    }
+    files = cli.requests[0].prompt.stable_prefix[1]
+    assert files.attachments == sort_attachments([PDF.attachment, PNG.attachment])
+    assert fallback_block(DOCX.attachment) in files.content
+    assert fallback_block(PDF.attachment) not in files.content  # native, not duplicated
+    # The scanned-page warning only matters for the text form.
+    assert next(r for r in member.attachments if r.filename == "report.pdf").warnings == ()
+
+
+def test_cli_member_with_image_only_support_gets_pdf_as_text() -> None:
+    store, ids = _store(PDF, PNG)
+    cli = FakeCliProvider("anthropic", capabilities=caps(AttachmentKind.IMAGE))
+    deps = _deps(store, cli_providers={"anthropic": cli})
+    result = _run(
+        deps, ids, [Selection(provider="anthropic", backend=Backend.CLI, model="anthropic-cli")]
+    )
+    member = result.members[0]
+    assert {r.filename: r.mode for r in member.attachments} == {
+        "report.pdf": "text",
+        "chart.png": "native",
+    }
+    files = cli.requests[0].prompt.stable_prefix[1]
+    assert files.attachments == (PNG.attachment,)
+    assert fallback_block(PDF.attachment) in files.content
+
+
+def test_cli_estimate_lines_show_native_delivery() -> None:
+    store, ids = _store(PNG)
+    with_images = FakeCliProvider("anthropic", capabilities=caps(AttachmentKind.IMAGE))
+    deps = _deps(store, cli_providers={"anthropic": with_images})
+    sel = [Selection(provider="anthropic", backend=Backend.CLI, model="anthropic-cli")]
+    details = asyncio.run(estimate_compare_details(TASK, sel, deps, attachment_ids=ids))
+    assert [(line.filename, line.mode) for line in details.attachments] == [("chart.png", "native")]
+    assert not details.refusals
 
 
 def test_errors_never_contain_file_content() -> None:
