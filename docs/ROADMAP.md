@@ -65,6 +65,29 @@ conversations affordable. Budget defaults raised and editable. Design:
 | C | memory layer: context layers, summaries, FTS retrieval, case file |
 | D | integration: jury inside a conversation, end-to-end tests |
 
+### M1.6: New-user onboarding (queued; confirm scope with the maintainer first)
+
+Guide the first setup end to end: subscription mode (install and sign in to Claude
+Code, Codex, Grok CLI; live check), API keys (extend the existing key wizard), and a
+very short tutorial (first jury question, continue a chat, ask the jury again).
+
+### M1.7: Small public eval (queued, after M1.6; hard cap $5-10)
+
+Goal: honest evidence that crossjury helps, not a research study.
+
+* Data: GPQA Diamond and SimpleQA, small samples (start with about 50 questions each;
+  grow only if the budget allows). Questions are downloaded at run time and never
+  committed (GPQA asks that items stay offline).
+* Compare: best single member, majority vote, crossjury synthesis. Headline metric is
+  flag precision: how often a claim marked disputed or possibly wrong really is wrong,
+  versus the error rate of unflagged claims.
+* Cost control: run the estimator first and stop above the cap; prefer `fast` and
+  `balanced` aliases and subscription CLIs (no API cost; uses plan limits).
+* Output: `scripts/eval/` (reproducible), `docs/evals.md` (method, date, model
+  versions, cost, limitations, where it does not help). README gets a short "Does it
+  help?" section with a 3-4 row table below the fold, only if the results hold up;
+  otherwise publish the method and scripts only.
+
 ### M2: v0.2 "download and use" (desktop app)
 
 - One-click desktop app for Windows and macOS (Linux AppImage if cheap):
