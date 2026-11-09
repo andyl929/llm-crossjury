@@ -10,8 +10,17 @@ Routes (all JSON unless noted):
 * ``DELETE /api/keys/{provider}``: delete the key saved in settings (other sources are
   never touched; the UI explains how to remove them).
 * ``POST /api/keys/{provider}/test``: list the vendor's models with the current key.
-* ``GET /api/onboarding``: whether to show the wizard, plus its static content.
+* ``GET /api/onboarding``: whether to show the wizard (no provider usable: no API key
+  from any source and no subscription CLI known to be ready, and not dismissed), the
+  last known subscription CLI states, whether the home page tutorial was seen, and the
+  wizard's static content. It never runs a CLI check: until the first check (``GET
+  /api/providers``) has run, the decision rests on the keys alone and ``cli_checked``
+  is ``false``.
 * ``POST /api/onboarding/dismiss`` with ``{"dismissed": true|false}``.
+* ``POST /api/onboarding/tutorial`` with ``{"seen": true|false}``: the home page
+  tutorial was shown (or should show again).
+
+Both flags live in ``<config dir>/ui-state.json``.
 
 Guards: the same as the main app (Host allow-list, JSON bodies, cross-origin rejection),
 checked again here so the router is safe even on its own. The ``PUT`` body is parsed by
@@ -56,6 +65,12 @@ MAX_BODY_BYTES = 8192
 UI_STATE_NAME = "ui-state.json"
 
 KeyTester = Callable[[str], Awaitable[KeyTestResult]]
+
+CliState = Literal["not_checked", "not_installed", "signed_out", "ready"]
+"""A subscription CLI's last known state. ``not_checked``: no check has run yet;
+``not_installed``: not found (or it did not answer its version check); ``signed_out``:
+found, but its login check failed; ``ready``: found and, where the CLI offers a login
+check, signed in."""
 
 
 class _Vendor(BaseModel):
@@ -160,18 +175,39 @@ class OnboardingBudget(_Frozen):
     daily_limit: Decimal
 
 
+class OnboardingSubscription(_Frozen):
+    """A subscription backend and its last known state (from the cached CLI check)."""
+
+    name: str
+    label: str
+    product: str
+    plan: str
+    experimental: bool
+    state: CliState
+
+
 class OnboardingResponse(_Frozen):
     show: bool
-    """No provider has a key from any source and the wizard was not dismissed."""
+    """No provider is usable (no key from any source, no CLI known to be ready) and the
+    wizard was not dismissed."""
     any_key_set: bool
+    any_cli_ready: bool
+    cli_checked: bool
+    """Every subscription CLI has been checked at least once. If ``false``, ``show``
+    rests on the keys alone; the client asks again after ``GET /api/providers``."""
     dismissed: bool
-    subscription_mode: Literal["coming_soon"]
+    tutorial_seen: bool
+    subscriptions: tuple[OnboardingSubscription, ...]
     providers: tuple[OnboardingProvider, ...]
     budget: OnboardingBudget
 
 
 class DismissResponse(_Frozen):
     dismissed: bool
+
+
+class TutorialResponse(_Frozen):
+    seen: bool
 
 
 class ErrorResponse(_Frozen):
@@ -267,19 +303,31 @@ def _row(info: KeyInfo, base_dir: Path) -> KeyRow:
     )
 
 
-def _read_dismissed(path: Path | None) -> bool:
+UI_FLAGS: tuple[str, ...] = ("onboarding_dismissed", "tutorial_seen")
+"""The boolean flags kept in the UI state file; anything else in it is dropped."""
+
+
+def _read_ui_state(path: Path | None) -> dict[str, bool]:
+    """The UI flags from the state file (missing or unreadable: all ``False``)."""
+    flags = dict.fromkeys(UI_FLAGS, False)
     if path is None or not path.is_file():
-        return False
+        return flags
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
-        return False
-    return isinstance(data, dict) and data.get("onboarding_dismissed") is True
+        return flags
+    if isinstance(data, dict):
+        for name in UI_FLAGS:
+            flags[name] = data.get(name) is True
+    return flags
 
 
-def _write_dismissed(path: Path, dismissed: bool) -> None:
+def _write_ui_flag(path: Path, name: str, value: bool) -> None:
+    """Set one flag, keeping the others."""
+    flags = _read_ui_state(path)
+    flags[name] = value
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"onboarding_dismissed": dismissed}) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(flags) + "\n", encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- router
@@ -293,6 +341,7 @@ class _Context:
     ui_state_path: Path | None
     tester: KeyTester
     budget: Callable[[], BudgetConfig]
+    subscriptions: Callable[[], tuple[OnboardingSubscription, ...]]
 
     def store(self) -> Path:
         return self.store_path if self.store_path is not None else key_store_path()
@@ -415,6 +464,24 @@ def _add_key_routes(router: APIRouter, ctx: _Context) -> None:
             return KeyTestResult(provider=provider, status="error", message="The check failed.")
 
 
+async def _set_flag(
+    request: Request, ctx: _Context, field: str, flag_name: str
+) -> bool | JSONResponse:
+    """Parse ``{"<field>": bool}`` (default ``true``) and store it as ``flag_name``."""
+    body = await _json_object(request)
+    flag = body.get(field, True) if body is not None else None
+    if not isinstance(flag, bool):
+        return _error(400, "invalid_body", f'Send {{"{field}": true}}.')
+    path = ctx.ui_state()
+    if path is None:
+        return _error(500, "config_dir", "The config directory is not usable.")
+    try:
+        await asyncio.to_thread(_write_ui_flag, path, flag_name, flag)
+    except OSError as exc:
+        return _error(500, "config_dir", f"Cannot save the setting: {exc.strerror}")
+    return flag
+
+
 def _add_onboarding_routes(router: APIRouter, ctx: _Context) -> None:
     @router.get("/api/onboarding", response_model=None)
     async def onboarding(request: Request) -> OnboardingResponse | JSONResponse:
@@ -425,13 +492,19 @@ def _add_onboarding_routes(router: APIRouter, ctx: _Context) -> None:
         except KeyStoreError as exc:
             return _error(500, "key_store", str(exc))
         any_set = any(r.status == "set" for r in infos)
+        subscriptions = ctx.subscriptions()
+        any_cli = any(s.state == "ready" for s in subscriptions)
         budget = ctx.budget()
-        dismissed = await asyncio.to_thread(_read_dismissed, ctx.ui_state())
+        flags = await asyncio.to_thread(_read_ui_state, ctx.ui_state())
+        dismissed = flags["onboarding_dismissed"]
         return OnboardingResponse(
-            show=not any_set and not dismissed,
+            show=not any_set and not any_cli and not dismissed,
             any_key_set=any_set,
+            any_cli_ready=any_cli,
+            cli_checked=all(s.state != "not_checked" for s in subscriptions),
             dismissed=dismissed,
-            subscription_mode="coming_soon",
+            tutorial_seen=flags["tutorial_seen"],
+            subscriptions=subscriptions,
             providers=tuple(
                 OnboardingProvider(
                     name=r.name,
@@ -454,18 +527,15 @@ def _add_onboarding_routes(router: APIRouter, ctx: _Context) -> None:
     async def dismiss(request: Request) -> DismissResponse | JSONResponse:
         if (refused := check_request(request, ctx.hosts)) is not None:
             return refused
-        body = await _json_object(request)
-        flag = body.get("dismissed", True) if body is not None else None
-        if not isinstance(flag, bool):
-            return _error(400, "invalid_body", 'Send {"dismissed": true}.')
-        path = ctx.ui_state()
-        if path is None:
-            return _error(500, "config_dir", "The config directory is not usable.")
-        try:
-            await asyncio.to_thread(_write_dismissed, path, flag)
-        except OSError as exc:
-            return _error(500, "config_dir", f"Cannot save the setting: {exc.strerror}")
-        return DismissResponse(dismissed=flag)
+        result = await _set_flag(request, ctx, "dismissed", "onboarding_dismissed")
+        return result if isinstance(result, JSONResponse) else DismissResponse(dismissed=result)
+
+    @router.post("/api/onboarding/tutorial", response_model=None)
+    async def tutorial(request: Request) -> TutorialResponse | JSONResponse:
+        if (refused := check_request(request, ctx.hosts)) is not None:
+            return refused
+        result = await _set_flag(request, ctx, "seen", "tutorial_seen")
+        return result if isinstance(result, JSONResponse) else TutorialResponse(seen=result)
 
 
 def _fixed(budget: BudgetConfig) -> Callable[[], BudgetConfig]:
@@ -481,6 +551,7 @@ def create_settings_router(
     tester: KeyTester | None = None,
     budget: BudgetConfig | None = None,
     budget_source: Callable[[], BudgetConfig] | None = None,
+    subscriptions: Callable[[], tuple[OnboardingSubscription, ...]] | None = None,
 ) -> APIRouter:
     """Create the settings router (key management, onboarding, settings page).
 
@@ -494,6 +565,8 @@ def create_settings_router(
         budget: Budget shown in the wizard (default: :class:`BudgetConfig` defaults).
         budget_source: Returns the budget shown in the wizard, read on every request
             (wins over ``budget``; the app passes the Settings page's budget).
+        subscriptions: Returns the subscription backends with their last known CLI
+            state; it must not run a check (default: none offered).
     """
     ctx = _Context(
         base_dir=base_dir,
@@ -502,6 +575,7 @@ def create_settings_router(
         ui_state_path=ui_state_path,
         tester=tester if tester is not None else key_check.check_key,
         budget=budget_source if budget_source is not None else _fixed(budget or BudgetConfig()),
+        subscriptions=subscriptions if subscriptions is not None else tuple,
     )
     router = APIRouter()
     _add_page_routes(router, ctx)
@@ -510,4 +584,10 @@ def create_settings_router(
     return router
 
 
-__all__ = ["VENDORS", "check_request", "create_settings_router"]
+__all__ = [
+    "VENDORS",
+    "CliState",
+    "OnboardingSubscription",
+    "check_request",
+    "create_settings_router",
+]

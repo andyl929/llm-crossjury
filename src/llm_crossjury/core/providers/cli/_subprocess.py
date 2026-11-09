@@ -354,6 +354,15 @@ def _kill_tree(proc: asyncio.subprocess.Process) -> None:
         proc.kill()
 
 
+def kill_process_tree(proc: asyncio.subprocess.Process) -> None:
+    """Kill ``proc`` and all of its descendants. Best effort, never raises.
+
+    The process must have been started in its own process group (Windows) or session
+    (POSIX), as :func:`run_cli` does.
+    """
+    _kill_tree(proc)
+
+
 async def _feed_stdin(proc: asyncio.subprocess.Process, data: bytes) -> None:
     stream = proc.stdin
     if stream is None:

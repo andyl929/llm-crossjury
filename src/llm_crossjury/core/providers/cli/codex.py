@@ -325,6 +325,8 @@ class CodexCliProvider(CliProviderBase):
 
     name = "openai"
     command = "codex"
+    login_status_args = ("login", "status")
+    """Run by :meth:`check` (exit code only); also tells the UI that sign-in is checked."""
 
     def __init__(self, *, registry: ModelLookup | None = None) -> None:
         base_init = CliProviderBase.__init__

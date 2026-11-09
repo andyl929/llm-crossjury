@@ -300,7 +300,9 @@ def test_settings_page_is_isolated_and_offline(
     keys = client.get("/api/keys").json()
     assert {row["status"] for row in keys["providers"]} == {"not set"}
     assert str(tmp_path / "demo") in keys["store_path"]
-    assert client.get("/api/onboarding").json()["show"] is False
+    onboarding = client.get("/api/onboarding").json()
+    assert onboarding["show"] is False
+    assert onboarding["tutorial_seen"] is True  # opens only from "How it works"
     tested = client.post("/api/keys/anthropic/test", json={}).json()
     assert "Demo mode" in tested["message"]
     assert "ANTHROPIC_API_KEY" not in os.environ

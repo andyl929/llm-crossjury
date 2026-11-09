@@ -6,7 +6,9 @@ Serves one static page (vanilla HTML/CSS/JS, no build step) and a small JSON API
   its value), the usable models per backend (``api`` = API key, ``cli`` =
   "subscription", the vendor CLI the user signed in to), the CLI status from each
   CLI provider's ``check()`` (run concurrently on request, cached briefly, never at
-  startup; ``?refresh=true`` re-checks), and the effective budget.
+  startup; ``?refresh=true`` re-checks) with its state (not installed, signed out,
+  ready) and the official install and sign-in commands, and the effective budget.
+  ``GET /api/onboarding`` reads the same cache without running a check.
 * ``POST /api/estimate``: the cost range of the priced calls, the number of CLI calls
   (unknown cost), per-attachment token lines and the budget verdict (confirmation
   needed, or refused).
@@ -113,7 +115,13 @@ from llm_crossjury.web.attachments_api import UPLOAD_PATH, create_attachments_ro
 from llm_crossjury.web.chat_api import create_chat_router
 from llm_crossjury.web.session_hooks import AppContext
 from llm_crossjury.web.sessions_api import create_sessions_router
-from llm_crossjury.web.settings_api import KeyTester, create_settings_router
+from llm_crossjury.web.settings_api import (
+    CliState,
+    KeyTester,
+    OnboardingSubscription,
+    create_settings_router,
+)
+from llm_crossjury.web.setup_api import SetupJobs, create_setup_router
 
 LOOPBACK_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
 """Default ``Host`` header values the app accepts."""
@@ -135,15 +143,34 @@ MAX_STATUS_DETAIL_CHARS = 300
 
 
 @dataclass(frozen=True)
+class CliInstall:
+    """One official install command, for the platforms where it applies."""
+
+    platform: Literal["windows", "unix", "any"]
+    """``windows`` (PowerShell), ``unix`` (macOS, Linux, WSL) or ``any``."""
+    label: str
+    command: str
+
+
+@dataclass(frozen=True)
 class CliProduct:
     """Display text for a provider's subscription backend (not model facts)."""
 
     product: str
     command: str
     experimental: bool
-    install: tuple[str, ...]
-    """Official install commands, one per platform or method."""
+    plan: str
+    """The consumer plans that include the CLI, as the vendor names them."""
+    install_commands: tuple[CliInstall, ...]
+    """Official install commands (verified against the vendor's install docs)."""
+    sign_in_command: str
+    """What to type in a terminal to sign in (never run by llm-crossjury)."""
     sign_in: str
+
+    @property
+    def install(self) -> tuple[str, ...]:
+        """The install commands as one line each (``"<label>: <command>"``)."""
+        return tuple(f"{c.label}: {c.command}" for c in self.install_commands)
 
 
 CLI_PRODUCTS: dict[str, CliProduct] = {
@@ -151,28 +178,34 @@ CLI_PRODUCTS: dict[str, CliProduct] = {
         product="Claude Code",
         command="claude",
         experimental=False,
-        install=(
-            "macOS/Linux/WSL: curl -fsSL https://claude.ai/install.sh | bash",
-            "Windows PowerShell: irm https://claude.ai/install.ps1 | iex",
-            "Windows (winget): winget install Anthropic.ClaudeCode",
+        plan="Claude Pro or Max",
+        install_commands=(
+            CliInstall("unix", "macOS/Linux/WSL", "curl -fsSL https://claude.ai/install.sh | bash"),
+            CliInstall("windows", "Windows PowerShell", "irm https://claude.ai/install.ps1 | iex"),
+            CliInstall("windows", "Windows (winget)", "winget install Anthropic.ClaudeCode"),
         ),
+        sign_in_command="claude",
         sign_in="Run claude once in a terminal and sign in with your Claude account.",
     ),
     "openai": CliProduct(
         product="Codex CLI",
         command="codex",
         experimental=False,
-        install=("npm: npm install -g @openai/codex",),
+        plan="ChatGPT Plus or Pro",
+        install_commands=(CliInstall("any", "npm", "npm install -g @openai/codex"),),
+        sign_in_command="codex login",
         sign_in="Run codex login in a terminal and choose Sign in with ChatGPT.",
     ),
     "xai": CliProduct(
         product="Grok Build",
         command="grok",
         experimental=True,
-        install=(
-            "macOS/Linux/WSL: curl -fsSL https://x.ai/cli/install.sh | bash",
-            "Windows PowerShell: irm https://x.ai/cli/install.ps1 | iex",
+        plan="SuperGrok",
+        install_commands=(
+            CliInstall("unix", "macOS/Linux/WSL", "curl -fsSL https://x.ai/cli/install.sh | bash"),
+            CliInstall("windows", "Windows PowerShell", "irm https://x.ai/cli/install.ps1 | iex"),
         ),
+        sign_in_command="grok",
         sign_in="Run grok once in a terminal and sign in with your xAI account.",
     ),
 }
@@ -234,6 +267,14 @@ class ModelOption(_Frozen):
     aliases: tuple[str, ...]
 
 
+class InstallCommand(_Frozen):
+    """One official install command."""
+
+    platform: Literal["windows", "unix", "any"]
+    label: str
+    command: str
+
+
 class CliStatus(_Frozen):
     """The subscription (``cli``) backend of one provider."""
 
@@ -242,11 +283,17 @@ class CliStatus(_Frozen):
     experimental: bool
     available: bool
     """The CLI was found and answered its version/status check."""
+    state: CliState
+    login_checked: bool
+    """The CLI has a login status check; if not, ``ready`` means "found"."""
     detail: str
     """Check result (redacted, never credentials)."""
     version: str | None
+    plan: str
     install: tuple[str, ...]
+    install_commands: tuple[InstallCommand, ...]
     sign_in: str
+    sign_in_command: str
     models: tuple[ModelOption, ...]
     """Registry entries that list the ``cli`` backend and have ``cli_flags``."""
     default_model: str | None
@@ -402,6 +449,23 @@ def _redact_detail(text: str, deps: CompareDeps) -> str:
     return text
 
 
+def cli_state(status: ProviderStatus | None) -> CliState:
+    """Classify a CLI check result for the UI.
+
+    A CLI that answered ``--version`` reports a version; one that is then unavailable
+    failed its login check. Without a version it was not found or did not run.
+    """
+    if status is None:
+        return "not_checked"
+    if status.available:
+        return "ready"
+    return "signed_out" if status.version is not None else "not_installed"
+
+
+def _login_checked(provider: object) -> bool:
+    return getattr(provider, "login_status_args", None) is not None
+
+
 def _cli_status(name: str, deps: CompareDeps, status: ProviderStatus | None) -> CliStatus | None:
     product = CLI_PRODUCTS.get(name)
     if product is None or (name, Backend.CLI) not in deps.providers:
@@ -415,10 +479,18 @@ def _cli_status(name: str, deps: CompareDeps, status: ProviderStatus | None) -> 
         command=product.command,
         experimental=product.experimental,
         available=available,
+        state=cli_state(status),
+        login_checked=_login_checked(deps.providers[(name, Backend.CLI)]),
         detail=detail,
         version=version,
+        plan=product.plan,
         install=product.install,
+        install_commands=tuple(
+            InstallCommand(platform=c.platform, label=c.label, command=c.command)
+            for c in product.install_commands
+        ),
         sign_in=product.sign_in,
+        sign_in_command=product.sign_in_command,
         models=options,
         default_model=default,
     )
@@ -471,6 +543,15 @@ class CliCheckCache:
                     self._results[n] = (done, status)
             return {n: self._results[n][1] for n in names}
 
+    def invalidate(self, name: str) -> None:
+        """Forget ``name``'s result, so the next request checks it again."""
+        self._results.pop(name, None)
+
+    def peek(self, deps: CompareDeps) -> dict[str, ProviderStatus | None]:
+        """The last result per ``cli`` provider (``None``: never checked). Runs nothing."""
+        names = [name for name, backend in deps.providers if backend is Backend.CLI]
+        return {n: self._results[n][1] if n in self._results else None for n in names}
+
     @staticmethod
     async def _check(name: str, deps: CompareDeps) -> ProviderStatus:
         provider = deps.providers[(name, Backend.CLI)]
@@ -484,6 +565,27 @@ class CliCheckCache:
         return ProviderStatus(
             provider=name, backend=Backend.CLI, available=False, detail=detail, version=None
         )
+
+
+def _subscriptions(deps: CompareDeps, cache: CliCheckCache) -> tuple[OnboardingSubscription, ...]:
+    """The subscription backends with their last known state (never runs a check)."""
+    checks = cache.peek(deps)
+    rows: list[OnboardingSubscription] = []
+    for name in provider_names(deps):
+        product = CLI_PRODUCTS.get(name)
+        if product is None or (name, Backend.CLI) not in deps.providers:
+            continue
+        rows.append(
+            OnboardingSubscription(
+                name=name,
+                label=PROVIDER_LABELS.get(name, name),
+                product=product.product,
+                plan=product.plan,
+                experimental=product.experimental,
+                state=cli_state(checks.get(name)),
+            )
+        )
+    return tuple(rows)
 
 
 def _budget_info(deps: CompareDeps) -> BudgetInfo:
@@ -675,11 +777,15 @@ def _add_guard(app: FastAPI, hosts: frozenset[str]) -> None:
 
 
 def _add_compare_routes(
-    app: FastAPI, ctx: AppContext, files: Mapping[str, tuple[str, str]], *, demo: bool
+    app: FastAPI,
+    ctx: AppContext,
+    files: Mapping[str, tuple[str, str]],
+    *,
+    demo: bool,
+    cli_checks: CliCheckCache,
 ) -> None:
     """Register ``/``, ``/api/providers``, ``/api/estimate`` and ``/api/run``."""
     deps = ctx.deps
-    cli_checks = CliCheckCache()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> Response:
@@ -806,6 +912,21 @@ class _StaticFileRoute(Route):
         return Response(content=text, media_type=media)
 
 
+def _add_setup_routes(
+    app: FastAPI, jobs: SetupJobs | None, enabled: bool, cli_checks: CliCheckCache
+) -> None:
+    """One-click install and sign-in (off in demo mode); a finished job drops the
+    cached check of its CLI."""
+    manager = (jobs or SetupJobs()) if enabled else None
+    if manager is not None:
+        if manager.on_finish is None:
+            manager.on_finish = cli_checks.invalidate
+        app.router.on_shutdown.append(manager.shutdown)
+    app.state.crossjury_setup = manager
+    hosts: Sequence[str] = app.state.crossjury.allowed_hosts
+    app.include_router(create_setup_router(manager, allowed_hosts=hosts))
+
+
 def _static_files() -> dict[str, tuple[str, str]]:
     """``name -> (text, media type)`` for every servable file of the static package."""
     static = resources.files("llm_crossjury.web").joinpath("static")
@@ -851,6 +972,8 @@ def create_app(
     task_runner: TaskRunnerLike | None = None,
     case_file_builder: CaseFileBuilder | None = None,
     extra_routers: Sequence[RouterFactory] = (),
+    setup_jobs: SetupJobs | None = None,
+    setup_enabled: bool = True,
 ) -> FastAPI:
     """Create the compare UI app.
 
@@ -876,6 +999,9 @@ def create_app(
             ``app.state.crossjury.case_file_builder``.
         extra_routers: Router factories called with the :class:`AppContext` and
             included before the static files route.
+        setup_jobs: Install and sign-in job manager override (default: the official
+            whitelist, see :mod:`llm_crossjury.web.setup_api`).
+        setup_enabled: ``False`` turns the install and sign-in actions off (demo).
     """
     app = FastAPI(
         title="llm-crossjury",
@@ -941,7 +1067,8 @@ def create_app(
     files = _static_files()
     _add_guard(app, hosts)
     _add_error_handlers(app)
-    _add_compare_routes(app, ctx, files, demo=demo)
+    cli_checks = CliCheckCache()
+    _add_compare_routes(app, ctx, files, demo=demo, cli_checks=cli_checks)
 
     _add_synthesis_routes(app, ctx)
     app.include_router(create_attachments_router(lambda: deps().attachment_store))
@@ -953,6 +1080,7 @@ def create_app(
             ui_state_path=ui_state_path,
             tester=key_tester,
             budget_source=lambda: effective_budget(BudgetConfig(), settings.get().budget),
+            subscriptions=lambda: _subscriptions(deps(), cli_checks),
         )
     )
     app.include_router(
@@ -963,6 +1091,7 @@ def create_app(
     app.include_router(
         create_chat_router(deps, sessions, ctx.tasks, settings.get, None, index=memory_index)
     )
+    _add_setup_routes(app, setup_jobs if setup_enabled else None, setup_enabled, cli_checks)
     for factory in extra_routers:
         app.include_router(factory(ctx))
     app.router.routes.append(_StaticFileRoute(files))
