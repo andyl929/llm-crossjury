@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="72" viewBox="0 0 420 72" role="img" aria-labelledby="title">
+  <title id="title">llm-crossjury</title>
+  <style>
+    .ink { fill: #1f2328; }
+    .line { stroke: #1f2328; }
+    .accent { fill: #3b5bdb; }
+    .accent-line { stroke: #3b5bdb; }
+    @media (prefers-color-scheme: dark) {
+      .ink { fill: #e6e8eb; }
+      .line { stroke: #8b949e; }
+      .accent { fill: #7c95ff; }
+      .accent-line { stroke: #7c95ff; }
+    }
+  </style>
+  <!-- Mark: three independent answers converge on one synthesis. -->
+  <g stroke-width="3" stroke-linecap="round" fill="none">
+    <path class="line" d="M14 14 L40 36" />
+    <path class="line" d="M14 36 L40 36" />
+    <path class="line" d="M14 58 L40 36" />
+    <path class="accent-line" d="M40 36 L58 36" />
+  </g>
+  <circle class="ink" cx="12" cy="14" r="5" />
+  <circle class="ink" cx="12" cy="36" r="5" />
+  <circle class="ink" cx="12" cy="58" r="5" />
+  <circle class="accent" cx="62" cy="36" r="8" />
+  <text class="ink" x="84" y="47" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="32" font-weight="600" letter-spacing="-0.5">llm-crossjury</text>
+</svg>
