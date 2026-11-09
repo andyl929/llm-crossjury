@@ -13,3 +13,4 @@ Scripts in this directory **may make real, billed network calls**. Every such sc
 | Script | Purpose |
 |---|---|
 | `smoke_live.py` | One tiny real call per configured provider, to confirm wiring (placeholder) |
+| `smoke_cli_image.py` | One tiny `codex` CLI call with a generated 32x32 solid-colour PNG, to confirm native image input (subscription; cost unknown) |
