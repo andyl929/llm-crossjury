@@ -76,8 +76,49 @@ def test_page_uses_no_external_resources() -> None:
 
 def test_script_never_renders_server_text_as_html() -> None:
     script = _client(make_deps()).get("/app.js").text
-    assert "innerHTML" not in script
-    assert "insertAdjacentHTML" not in script
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
+        assert sink not in script
+
+
+def test_theme_script_and_icon_are_served_locally() -> None:
+    client = _client(make_deps())
+    theme = client.get("/theme.js")
+    assert theme.status_code == 200
+    assert theme.headers["content-type"].startswith("text/javascript")
+    assert "default-src 'self'" in theme.headers["content-security-policy"]
+    assert theme.text.isascii()
+    assert not re.search(r"https?://", theme.text)
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
+        assert sink not in theme.text
+    assert "try" in theme.text  # storage access survives blocked storage
+    icon = client.get("/favicon.svg")
+    assert icon.status_code == 200
+    assert icon.headers["content-type"].startswith("image/svg+xml")
+    assert "<script" not in icon.text
+    for page in ("/", "/settings"):
+        html = client.get(page).text
+        assert '<script src="/theme.js"></script>' in html
+        assert 'href="/favicon.svg"' in html
+
+
+def test_markdown_links_are_limited_to_http_and_open_without_opener() -> None:
+    script = _client(make_deps()).get("/app.js").text
+    assert 'url.protocol === "https:" || url.protocol === "http:"' in script
+    assert 'rel: "noopener noreferrer"' in script
+
+
+def test_page_shows_a_demo_badge_when_the_server_says_demo() -> None:
+    client = _client(make_deps())
+    assert 'id="demo-badge"' in client.get("/").text
+    assert "data.demo !== true" in client.get("/app.js").text
+
+
+def test_page_has_keyboard_shortcut_and_skip_link() -> None:
+    client = _client(make_deps())
+    page = client.get("/").text
+    assert 'class="skip-link" href="#main"' in page
+    assert 'aria-keyshortcuts="Control+Enter Meta+Enter"' in page
+    assert "event.ctrlKey || event.metaKey" in client.get("/app.js").text
 
 
 # --------------------------------------------------------------------------- providers

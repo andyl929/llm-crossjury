@@ -84,6 +84,13 @@ def test_settings_assets_are_ascii_local_and_never_use_html_sinks(client: TestCl
         assert storage not in script
 
 
+def test_settings_page_shares_the_theme_and_navigation(client: TestClient) -> None:
+    page = client.get("/settings").text
+    assert '<a href="/settings" aria-current="page">Settings</a>' in page
+    assert 'id="theme-toggle"' in page
+    assert 'class="skip-link" href="#main"' in page
+
+
 def test_key_inputs_are_password_fields(client: TestClient) -> None:
     assert 'id="wizard-key" type="password"' in client.get("/settings").text
     assert 'type: "password"' in client.get("/settings.js").text

@@ -6,6 +6,8 @@
 
 (function () {
   const $ = (id) => document.getElementById(id);
+  const SPRITE = document.querySelector("svg.sprite");
+  const SVG_NS = SPRITE ? SPRITE.namespaceURI : null;
 
   const state = {
     keys: [],
@@ -14,7 +16,7 @@
     wizardProvider: null,
     busy: false,
   };
-  const STEPS = ["Keys vs subscriptions", "Get a key", "Paste", "Test", "Budget", "Done"];
+  const STEPS = ["Keys or subscriptions", "Get a key", "Paste", "Test", "Limits", "Done"];
 
   function el(tag, attrs, children) {
     const node = document.createElement(tag);
@@ -26,10 +28,22 @@
       else node.setAttribute(key, value === true ? "" : String(value));
     }
     for (const child of [].concat(children || [])) {
-      if (child === null || child === undefined) continue;
+      if (child === null || child === undefined || child === false) continue;
       node.append(child instanceof Node ? child : document.createTextNode(String(child)));
     }
     return node;
+  }
+
+  function icon(name) {
+    if (!SVG_NS) return null;
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "icon");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    const use = document.createElementNS(SVG_NS, "use");
+    use.setAttribute("href", "#i-" + name);
+    svg.append(use);
+    return svg;
   }
 
   async function api(method, path, body) {
@@ -38,7 +52,12 @@
       options.headers["Content-Type"] = "application/json";
       options.body = JSON.stringify(body);
     }
-    const response = await fetch(path, options);
+    let response;
+    try {
+      response = await fetch(path, options);
+    } catch (_) {
+      throw new Error("Cannot reach the llm-crossjury server. Check that it is still running in your terminal, then reload.");
+    }
     let data = null;
     try { data = await response.json(); } catch (_) { data = null; }
     if (!response.ok) {
@@ -54,13 +73,19 @@
 
   function showMessage(text) {
     const box = $("message");
-    box.textContent = text || "";
+    box.replaceChildren();
     box.hidden = !text;
+    if (text) box.append(icon("alert"), el("div", { class: "message-body" }, el("span", { text: text })));
   }
 
+  // Status text next to a control. cls: result-valid, result-error, result-network_error...
   function setStatus(node, text, cls) {
-    node.textContent = text || "";
-    node.className = cls ? cls : "muted";
+    node.replaceChildren();
+    node.className = "status" + (cls ? " " + cls : "");
+    if (!text) return;
+    if (cls === "result-valid") node.append(icon("check"));
+    else if (cls && cls !== "muted") node.append(icon("alert"));
+    node.append(el("span", { text: text }));
   }
 
   function safeHttpsUrl(url) {
@@ -70,7 +95,9 @@
   function vendorLink(url, label) {
     const href = safeHttpsUrl(url);
     if (!href) return document.createTextNode(label);
-    return el("a", { href: href, target: "_blank", rel: "noopener noreferrer", text: label });
+    return el("a", { href: href, target: "_blank", rel: "noopener noreferrer", class: "ext-link" }, [
+      label, icon("external"), el("span", { class: "visually-hidden", text: " (opens in a new tab)" }),
+    ]);
   }
 
   // ------------------------------------------------------------------ keys page
@@ -91,22 +118,21 @@
 
   function renderKeyRow(row) {
     const isSet = row.status === "set";
-    const status = el("span", {
-      class: "badge " + (isSet ? "badge-ok" : "badge-off"),
-      text: isSet ? "set" : "not set",
-    });
-    const result = el("span", { class: "muted", "aria-live": "polite" });
-    const formSlot = el("div");
+    const status = el("span", { class: "lamp " + (isSet ? "lamp-ok" : "lamp-warn"), text: isSet ? "Key set" : "No key" });
+    const result = el("span", { class: "status", "aria-live": "polite" });
+    const formSlot = el("div", { class: "key-form-slot" });
 
     const testBtn = el("button", {
       type: "button", class: "btn", text: "Test connection", disabled: !isSet,
+      title: isSet ? null : "Add a key first",
       onclick: () => testKey(row.name, result, testBtn),
     });
     const editBtn = el("button", {
       type: "button", class: "btn",
       text: row.stored ? "Replace key" : "Add key",
-      onclick: () => toggleForm(row, formSlot, result),
+      "aria-expanded": "false",
     });
+    editBtn.addEventListener("click", () => toggleForm(row, formSlot, result, editBtn));
     const deleteBtn = row.stored ? el("button", {
       type: "button", class: "btn btn-danger", text: "Delete saved key",
       onclick: () => deleteKey(row, result),
@@ -117,7 +143,7 @@
       : "No key from any source.";
     return el("div", { class: "key-row", "data-provider": row.name }, [
       el("div", { class: "key-row-head" }, [
-        el("span", { class: "key-name", text: row.label }),
+        el("h3", { class: "key-name", text: row.label }),
         status,
         el("span", { class: "key-env" }, ["Variable ", el("code", { text: row.env_var })]),
       ]),
@@ -146,21 +172,29 @@
     ]);
   }
 
-  function toggleForm(row, slot, result) {
-    if (slot.firstChild) { slot.replaceChildren(); return; }
+  function toggleForm(row, slot, result, opener) {
+    if (slot.firstChild) {
+      slot.replaceChildren();
+      opener.setAttribute("aria-expanded", "false");
+      return;
+    }
+    const inputId = "key-input-" + row.name;
     const input = el("input", {
-      type: "password", autocomplete: "off", spellcheck: "false",
-      placeholder: "Paste the " + row.label + " API key", "aria-label": row.label + " API key",
+      id: inputId, type: "password", autocomplete: "off", spellcheck: "false",
+      placeholder: "Paste the " + row.label + " API key",
     });
-    const save = el("button", { type: "submit", class: "btn btn-primary", text: "Save" });
+    const save = el("button", { type: "submit", class: "btn btn-primary", text: "Save key" });
     const cancel = el("button", {
       type: "button", class: "btn", text: "Cancel",
-      onclick: () => { input.value = ""; slot.replaceChildren(); },
+      onclick: () => { input.value = ""; slot.replaceChildren(); opener.setAttribute("aria-expanded", "false"); opener.focus(); },
     });
-    const form = el("form", { class: "key-inline-form", autocomplete: "off" }, [input, save, cancel]);
+    const form = el("form", { class: "key-inline-form", autocomplete: "off" }, [
+      el("label", { class: "field-label", for: inputId, text: "New " + row.label + " API key" }),
+      el("div", { class: "key-inline-row" }, [input, save, cancel]),
+    ]);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!input.value.trim()) { setStatus(result, "Paste a key first.", "result-error"); return; }
+      if (!input.value.trim()) { setStatus(result, "Paste a key first.", "result-error"); input.focus(); return; }
       save.disabled = true;
       try {
         const data = await saveKey(row.name, input);
@@ -173,6 +207,7 @@
       }
     });
     slot.replaceChildren(form);
+    opener.setAttribute("aria-expanded", "true");
     input.focus();
   }
 
@@ -183,7 +218,7 @@
   }
 
   async function deleteKey(row, result) {
-    if (!window.confirm("Delete the " + row.label + " key saved in settings?")) return;
+    if (!window.confirm("Delete the " + row.label + " key saved in settings? Other sources are not touched.")) return;
     try {
       await api("DELETE", "/api/keys/" + encodeURIComponent(row.name));
       await loadKeys();
@@ -194,7 +229,8 @@
 
   async function testKey(provider, result, button) {
     if (button) button.disabled = true;
-    setStatus(result, "Testing...", "muted");
+    result.replaceChildren(el("span", { class: "spinner" }), el("span", { text: "Testing\u2026" }));
+    result.className = "status";
     try {
       const data = await api("POST", "/api/keys/" + encodeURIComponent(provider) + "/test", {});
       const label = {
@@ -220,36 +256,44 @@
   function renderWizardStatic() {
     const ob = state.onboarding;
     $("wizard-links").replaceChildren(...ob.providers.map((p) => el("li", {}, [
-      el("strong", { text: p.label + ": " }),
+      el("strong", { text: p.label }),
       vendorLink(p.key_page_url, p.key_page_label),
     ])));
     const select = $("wizard-provider");
     select.replaceChildren(...ob.providers.map((p) => el("option", { value: p.name, text: p.label })));
     if (state.wizardProvider) select.value = state.wizardProvider;
     const b = ob.budget;
-    const money = (v) => b.currency + " " + Number(v).toFixed(2);
+    const money = (v) => (b.currency === "USD" ? "$" : b.currency + " ") + Number(v).toFixed(2);
     $("wizard-budget").replaceChildren(
-      el("dt", { text: "Daily limit" }), el("dd", { text: money(b.daily_limit) }),
-      el("dt", { text: "Limit per run" }), el("dd", { text: money(b.run_limit) }),
-      el("dt", { text: "Ask before runs above" }), el("dd", { text: money(b.confirm_above) }),
+      el("div", {}, [el("dt", { text: "Daily limit" }), el("dd", { text: money(b.daily_limit) })]),
+      el("div", {}, [el("dt", { text: "Limit per run" }), el("dd", { text: money(b.run_limit) })]),
+      el("div", {}, [el("dt", { text: "Ask before runs above" }), el("dd", { text: money(b.confirm_above) })]),
     );
   }
 
-  function renderWizardStep() {
+  function renderWizardStep(moveFocus) {
     for (const node of document.querySelectorAll(".wizard-step")) {
       node.hidden = Number(node.dataset.step) !== state.step;
     }
-    $("wizard-progress").replaceChildren(...STEPS.map((name, i) => el("li", {
-      class: i + 1 === state.step ? "current" : (i + 1 < state.step ? "done" : null),
-      "aria-current": i + 1 === state.step ? "step" : null,
-      text: (i + 1) + ". " + name,
-    })));
+    $("wizard-progress").replaceChildren(...STEPS.map((name, i) => {
+      const n = i + 1;
+      const cls = n === state.step ? "current" : (n < state.step ? "done" : null);
+      return el("li", { class: cls, "aria-current": n === state.step ? "step" : null }, [
+        el("span", { class: "step-mark", "aria-hidden": "true" }, n < state.step ? icon("check") : String(n)),
+        el("span", { class: "step-name", text: name }),
+        n < state.step ? el("span", { class: "visually-hidden", text: " (done)" }) : null,
+      ]);
+    }));
     $("wizard-back").disabled = state.step === 1;
     $("wizard-next").hidden = state.step === STEPS.length;
     $("wizard-skip").textContent = state.step === STEPS.length ? "Close" : "Skip setup";
     if (state.step === 4) {
       const p = providerLabel(state.wizardProvider || $("wizard-provider").value);
       $("wizard-test").textContent = "Test " + p + " connection";
+    }
+    if (moveFocus) {
+      const heading = document.querySelector('.wizard-step[data-step="' + state.step + '"] h3');
+      if (heading) { heading.setAttribute("tabindex", "-1"); heading.focus(); }
     }
   }
 
@@ -265,10 +309,11 @@
   function goStep(step) {
     if (step === 4 && !anyKeySet()) {
       setStatus($("wizard-save-status"), "Save a key first, or skip setup.", "result-error");
+      $("wizard-key").focus();
       return;
     }
     state.step = Math.max(1, Math.min(STEPS.length, step));
-    renderWizardStep();
+    renderWizardStep(true);
   }
 
   async function closeWizard() {
@@ -280,7 +325,7 @@
     $("wizard").hidden = false;
     $("open-wizard").hidden = true;
     renderWizardStatic();
-    renderWizardStep();
+    renderWizardStep(false);
     $("wizard-next").addEventListener("click", () => goStep(state.step + 1));
     $("wizard-back").addEventListener("click", () => goStep(state.step - 1));
     $("wizard-skip").addEventListener("click", closeWizard);
@@ -290,7 +335,7 @@
       const input = $("wizard-key");
       const status = $("wizard-save-status");
       const provider = $("wizard-provider").value;
-      if (!input.value.trim()) { setStatus(status, "Paste a key first.", "result-error"); return; }
+      if (!input.value.trim()) { setStatus(status, "Paste a key first.", "result-error"); input.focus(); return; }
       $("wizard-save").disabled = true;
       try {
         const data = await saveKey(provider, input);

@@ -180,11 +180,15 @@ _STATIC_FILES: dict[str, str] = {
     "/": "index.html",
     "/app.js": "app.js",
     "/app.css": "app.css",
+    "/theme.js": "theme.js",
+    "/favicon.svg": "favicon.svg",
 }
 _MEDIA_TYPES = {
     "index.html": "text/html; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
     "app.css": "text/css; charset=utf-8",
+    "theme.js": "text/javascript; charset=utf-8",
+    "favicon.svg": "image/svg+xml",
 }
 
 DepsFactory = Callable[[], CompareDeps]
@@ -674,6 +678,14 @@ def create_app(
     @app.get("/app.css")
     async def app_css() -> Response:
         return page("/app.css")
+
+    @app.get("/theme.js")
+    async def theme_js() -> Response:
+        return page("/theme.js")
+
+    @app.get("/favicon.svg")
+    async def favicon() -> Response:
+        return page("/favicon.svg")
 
     @app.get("/api/providers")
     async def providers(refresh: bool = False) -> ProvidersResponse:
