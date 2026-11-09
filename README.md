@@ -46,8 +46,9 @@ subscription, and shows the cost before every run.
 
 ### Compare answers side by side
 
-Pick the models, estimate the cost, run. Each answer shows its model, token counts,
-cost and time.
+Pick the models, estimate the cost, run (Ctrl+Enter works too). Each answer shows its
+model, token counts, cost and time; copy one answer or export the whole run as
+Markdown.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/compare-dark.png">
@@ -313,8 +314,7 @@ are placeholders for now.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md). Next up: the PyPI package, Markdown export and
-copy buttons, local run history, a desktop app for Windows and macOS, a redesigned UI
+See [docs/ROADMAP.md](docs/ROADMAP.md). Next up: the PyPI package, local run history, a desktop app for Windows and macOS, a redesigned UI
 with streaming answers, and the command-line `run` command with the Council and
 Document Review modes described in the [spec](docs/SPEC.md).
 

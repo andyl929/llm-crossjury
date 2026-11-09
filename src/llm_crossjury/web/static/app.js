@@ -1496,6 +1496,12 @@
 
   const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 
+  function newList(tag, marker) {
+    // An ordered list keeps its first number (e.g. a list that starts at "3.").
+    const n = parseInt(marker, 10);
+    return tag === "ol" && n > 1 ? el("ol", { start: String(n) }) : el(tag);
+  }
+
   function renderMarkdown(text) {
     const root = el("div", { class: "md" });
     const lines = String(text || "").split(/\r?\n/);
@@ -1551,7 +1557,7 @@
         while (lists.length > 1 && indent < lists[lists.length - 1].indent) lists.pop();
         const top = lists[lists.length - 1];
         if (!top) {
-          lists.push({ node: el(tag), indent: indent });
+          lists.push({ node: newList(tag, item[2]), indent: indent });
         } else if (indent > top.indent + 1 && lists.length < 3 && top.node.lastElementChild) {
           const nested = el(tag);
           top.node.lastElementChild.append(nested);
@@ -1559,7 +1565,7 @@
         } else if (top.node.tagName.toLowerCase() !== tag) {
           if (lists.length === 1) {
             flushList();
-            lists.push({ node: el(tag), indent: indent });
+            lists.push({ node: newList(tag, item[2]), indent: indent });
           } else {
             lists.pop();
             const nested = el(tag);
@@ -1573,7 +1579,9 @@
         if (!quote) quote = [];
         quote.push(quoted[1]);
       } else if (line.trim() === "") {
-        flushAll();
+        // A blank line ends paragraphs and quotes; a list stays open so that a loose
+        // list ("1. a", blank, "2. b") renders as one list. Any non-item line closes it.
+        flushPara(); flushQuote();
       } else if (lists.length && /^\s+\S/.test(line)) {
         const li = lists[lists.length - 1].node.lastElementChild;
         if (li) li.append(document.createTextNode(" "), ...inlineNodes(line.trim()));

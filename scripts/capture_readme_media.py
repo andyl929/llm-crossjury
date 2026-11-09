@@ -601,6 +601,13 @@ def make_samples(directory: Path) -> list[Path]:
 # --------------------------------------------------------------------------- flows
 
 
+_FIXED_CHROME_JS = (
+    "document.querySelectorAll('footer.strip').forEach("
+    "(e) => {{ e.style.visibility = '{value}'; }})"
+)
+"""Hide (``hidden``) or restore (``""``) the fixed bottom strip of the compare page."""
+
+
 @dataclass
 class Shots:
     """Writes light and dark stills of the current state."""
@@ -610,15 +617,21 @@ class Shots:
     written: list[Path] = field(default_factory=list)
 
     def capture(self, name: str, key: str, *, max_height: float | None = None) -> None:
-        for dark in (False, True):
-            self.page.theme(dark)
-            time.sleep(0.15)
-            data = self.page.screenshot(self.page.clip(key, max_height=max_height))
-            self.page.screenshot()  # settle the viewport after a beyond-viewport capture
-            path = self.out / f"{name}-{'dark' if dark else 'light'}.png"
-            path.write_bytes(data)
-            self.written.append(path)
-        self.page.theme(False)
+        # Fixed-position chrome (the bottom cost strip) would be painted over the middle
+        # of an element clip; hide it for element stills (visibility keeps the layout).
+        self.page.js(_FIXED_CHROME_JS.format(value="hidden"))
+        try:
+            for dark in (False, True):
+                self.page.theme(dark)
+                time.sleep(0.15)
+                data = self.page.screenshot(self.page.clip(key, max_height=max_height))
+                self.page.screenshot()  # settle the viewport after a beyond-viewport capture
+                path = self.out / f"{name}-{'dark' if dark else 'light'}.png"
+                path.write_bytes(data)
+                self.written.append(path)
+        finally:
+            self.page.js(_FIXED_CHROME_JS.format(value=""))
+            self.page.theme(False)
 
     def capture_viewport(self, name: str) -> None:
         for dark in (False, True):
