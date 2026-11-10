@@ -1,6 +1,7 @@
 """Demo responder: answers every request from the canned script, chosen by its schema.
 
-* No response schema: the provider's canned step-1 answer (whatever the task says).
+* No response schema: the provider's canned step-1 answer (whatever the task says), or,
+  for a chat message (stage ``chat``), the canned follow-up reply.
 * ``AgreementJudgment``: groups the segments listed in the prompt by their canned topic.
 * ``PeerReview``: canned issues and strengths for each assigned target, and a ranking.
 * ``Synthesis``: the canned chair output (consensus, disputes, unique insights and the
@@ -42,6 +43,8 @@ _UNIQUE_RULING = re.compile(
     r"^- (Include|Do not include) unique insight (\d+) \(from (Response [A-Z]+)\): (.*)$"
 )
 _FINGERPRINT_CHARS = 80
+_CHAT_STAGE = "chat"
+"""``tags["stage"]`` of a chat call (``core.chat_service.CHAT_STAGE``)."""
 _MIN_SUPPORTERS = 2
 
 
@@ -293,6 +296,8 @@ def respond(provider: str, request: CompletionRequest) -> str:
         Free text for a step-1 answer, otherwise one JSON object matching the schema.
     """
     if request.response_schema is None:
+        if request.tags.get("stage") == _CHAT_STAGE:
+            return script.CHAT_REPLY
         return answer(provider)
     keys = _schema_keys(request.response_schema)
     text = _prompt_text(request)

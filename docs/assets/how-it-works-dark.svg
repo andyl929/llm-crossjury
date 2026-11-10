@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="540" viewBox="0 0 560 540" role="img" aria-labelledby="t d">
+  <title id="t">How llm-crossjury works</title>
+  <desc id="d">One question goes to several models, which answer on their own (step 1). AI synthesize checks agreement, runs an anonymous peer review (skipped when 80 percent agree) and has a chair model write one final answer with a list of disputed points, possibly wrong claims and left-out insights (step 2). You then keep talking with any model (step 3), and can ask the jury again with the conversation as context.</desc>
+  <style>
+    text { font-family: -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    .t { fill: #E3E6E9; font-size: 17px; font-weight: 600; }
+    .s { fill: #9BA6B0; font-size: 13px; }
+    .lbl { fill: #9BA6B0; font-size: 13px; font-weight: 600; }
+    .m { fill: #E3E6E9; font-size: 15px; font-weight: 600; }
+    .box { fill: #24292E; stroke: #434B53; stroke-width: 1; }
+    .hot { fill: #F5B800; }
+    .hot-t { fill: #1E2226; font-size: 17px; font-weight: 600; }
+    .hot-s { fill: #1E2226; font-size: 13px; }
+    .ln { fill: none; stroke: #8A949E; stroke-width: 1.5; }
+    .dash { fill: none; stroke: #8A949E; stroke-width: 1.5; stroke-dasharray: 4 4; }
+    .grp { fill: none; stroke: #5F6871; stroke-width: 1; stroke-dasharray: 2 4; }
+    .loop { fill: none; stroke: #F5B800; stroke-width: 2; }
+    .loop-t { fill: #E3E6E9; font-size: 13px; font-weight: 600; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="#8A949E"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="#F5B800"/></marker>
+  </defs>
+  <rect class="box" x="110" y="10" width="340" height="54" rx="6"/>
+  <text class="t" x="280.0" y="34" text-anchor="middle">Your question</text>
+  <text class="s" x="280.0" y="54" text-anchor="middle">plus any PDFs, Word files or screenshots</text>
+  <text class="lbl" x="270" y="86" text-anchor="end">Step 1: answers, side by side</text>
+  <path class="ln" d="M280 64 L280 92"/>
+  <path class="ln" d="M280 166 L280 202" marker-end="url(#a)"/>
+  <rect class="box" x="44" y="112" width="113" height="40" rx="6"/>
+  <text class="m" x="100.5" y="137" text-anchor="middle">Claude</text>
+  <path class="ln" d="M280 92 L106.5 92 Q100.5 92 100.5 98 L100.5 110" marker-end="url(#a)"/>
+  <path class="ln" d="M100.5 152 L100.5 160 Q100.5 166 106.5 166 L280 166"/>
+  <rect class="box" x="167" y="112" width="113" height="40" rx="6"/>
+  <text class="m" x="223.5" y="137" text-anchor="middle">ChatGPT</text>
+  <path class="ln" d="M280 92 L229.5 92 Q223.5 92 223.5 98 L223.5 110" marker-end="url(#a)"/>
+  <path class="ln" d="M223.5 152 L223.5 160 Q223.5 166 229.5 166 L280 166"/>
+  <rect class="box" x="290" y="112" width="113" height="40" rx="6"/>
+  <text class="m" x="346.5" y="137" text-anchor="middle">Gemini</text>
+  <path class="ln" d="M280 92 L340.5 92 Q346.5 92 346.5 98 L346.5 110" marker-end="url(#a)"/>
+  <path class="ln" d="M346.5 152 L346.5 160 Q346.5 166 340.5 166 L280 166"/>
+  <rect class="box" x="413" y="112" width="113" height="40" rx="6"/>
+  <text class="m" x="469.5" y="137" text-anchor="middle">Grok</text>
+  <path class="ln" d="M280 92 L463.5 92 Q469.5 92 469.5 98 L469.5 110" marker-end="url(#a)"/>
+  <path class="ln" d="M469.5 152 L469.5 160 Q469.5 166 463.5 166 L280 166"/>
+  <rect class="grp" x="40" y="172" width="480" height="270" rx="10"/>
+  <text class="lbl" x="54" y="192">Step 2: AI synthesize (one click)</text>
+  <rect class="box" x="110" y="204" width="340" height="54" rx="6"/>
+  <text class="t" x="280.0" y="228" text-anchor="middle">Agreement check</text>
+  <text class="s" x="280.0" y="248" text-anchor="middle">what the answers share, dispute or say alone</text>
+  <path class="ln" d="M280 258 L280 280" marker-end="url(#a)"/>
+  <rect class="box" x="110" y="282" width="340" height="54" rx="6"/>
+  <text class="t" x="280.0" y="306" text-anchor="middle">Anonymous peer review</text>
+  <text class="s" x="280.0" y="326" text-anchor="middle">names hidden, labels shuffled, issues quoted</text>
+  <path class="ln" d="M280 336 L280 358" marker-end="url(#a)"/>
+  <rect class="hot" x="110" y="360" width="340" height="72" rx="6"/>
+  <text class="hot-t" x="280.0" y="384" text-anchor="middle">One final answer from a chair model</text>
+  <text class="hot-s" x="280.0" y="404" text-anchor="middle">with a list of disputed points, possibly</text>
+  <text class="hot-s" x="280.0" y="421" text-anchor="middle">wrong claims and insights it left out</text>
+  <path class="dash" d="M450 231 C492 231 492 396 452 396" marker-end="url(#a)"/>
+  <text class="s" x="496" y="306" text-anchor="end">skip</text>
+  <text class="s" x="502" y="322" text-anchor="end">if 80%</text>
+  <text class="s" x="500" y="338" text-anchor="end">agree</text>
+  <path class="ln" d="M280 432 L280 476" marker-end="url(#a)"/>
+  <text class="lbl" x="290" y="462">Step 3</text>
+  <rect class="box" x="110" y="478" width="340" height="54" rx="6"/>
+  <text class="t" x="280.0" y="502" text-anchor="middle">Keep talking</text>
+  <text class="s" x="280.0" y="522" text-anchor="middle">continue with any model, or with the chair</text>
+  <path class="loop" d="M110 505 L22 505 Q14 505 14 497 L14 45 Q14 37 22 37 L106 37" marker-end="url(#b)"/>
+  <text class="loop-t" transform="translate(30 452) rotate(-90)">Ask the jury again, with the conversation as context</text>
+</svg>
