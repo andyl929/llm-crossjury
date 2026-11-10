@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import time
 import uuid
@@ -1249,17 +1250,74 @@ async def _run_member(
     )
 
 
+MemberCallback = Callable[[int, MemberResult], None]
+"""Called with ``(index, result)`` as each member finishes (index into the selections)."""
+
+_log = logging.getLogger(__name__)
+
+
+def _notify(on_member: MemberCallback | None, index: int, member: MemberResult) -> None:
+    if on_member is None:
+        return
+    try:
+        on_member(index, member)
+    except Exception as exc:  # a progress hook must never fail the member
+        _log.debug("member callback failed (%s)", type(exc).__name__)
+
+
+def compare_result(run_id: str, currency: str, members: Sequence[MemberResult]) -> CompareResult:
+    """A :class:`CompareResult` of ``members`` with its totals computed.
+
+    Args:
+        run_id: Run id of the result.
+        currency: Budget currency.
+        members: Member results, in selection order.
+    """
+    known = [m.cost for m in members if m.cost is not None]
+    return CompareResult(
+        run_id=run_id,
+        prompt_id=PROMPT_ID,
+        currency=currency,
+        members=tuple(members),
+        total_cost=sum(known, Decimal(0)),
+        unknown_cost_members=sum(1 for m in members if m.error is None and m.cost is None),
+    )
+
+
+def replace_member(result: CompareResult, index: int, member: MemberResult) -> CompareResult:
+    """``result`` with member ``index`` replaced and the totals recomputed (a retry).
+
+    Raises:
+        IndexError: ``index`` is out of range.
+    """
+    if not 0 <= index < len(result.members):
+        raise IndexError(index)
+    members = list(result.members)
+    members[index] = member
+    return compare_result(result.run_id, result.currency, members)
+
+
 async def execute_calls(
     run_id: str,
     prepared: Sequence[PreparedCall],
     deps: CompareDeps,
     *,
     allow_unknown_cost: bool = False,
+    on_member: MemberCallback | None = None,
 ) -> CompareResult:
     """Run prepared calls concurrently; each member's failure stays in its own entry.
 
     No run-level budget pre-check happens here (see :func:`run_compare`); each ``api``
     call is still checked against the ledger before it starts.
+
+    Args:
+        run_id: Run id of every call.
+        prepared: The calls, in selection order.
+        deps: Compare dependencies.
+        allow_unknown_cost: Consent to ``cli`` calls of unknown cost.
+        on_member: Called with ``(index, result)`` as soon as each member finishes,
+            in completion order (an exception it raises is logged and ignored). The
+            returned members keep the selection order.
 
     Raises:
         ConsentRequiredError: a ``cli`` call without ``allow_unknown_cost``.
@@ -1268,18 +1326,19 @@ async def execute_calls(
         sum(1 for call in prepared if call.selection.backend is Backend.CLI), allow_unknown_cost
     )
     highs = [_estimate_prepared([call], deps).total_high for call in prepared]
+
+    async def one(index: int, call: PreparedCall, high: Decimal) -> MemberResult:
+        member = await _run_member(run_id, call, high, deps)
+        _notify(on_member, index, member)
+        return member
+
     members = await asyncio.gather(
-        *(_run_member(run_id, call, high, deps) for call, high in zip(prepared, highs, strict=True))
+        *(
+            one(index, call, high)
+            for index, (call, high) in enumerate(zip(prepared, highs, strict=True))
+        )
     )
-    known = [m.cost for m in members if m.cost is not None]
-    return CompareResult(
-        run_id=run_id,
-        prompt_id=PROMPT_ID,
-        currency=deps.budget.currency,
-        members=tuple(members),
-        total_cost=sum(known, Decimal(0)),
-        unknown_cost_members=sum(1 for m in members if m.error is None and m.cost is None),
-    )
+    return compare_result(run_id, deps.budget.currency, members)
 
 
 def new_run_id() -> str:
@@ -1295,6 +1354,7 @@ async def run_compare(
     run_id: str | None = None,
     allow_unknown_cost: bool = False,
     attachment_ids: Sequence[str] = (),
+    on_member: MemberCallback | None = None,
 ) -> CompareResult:
     """Check consent, estimate, check the budget, then run every member concurrently.
 
@@ -1306,6 +1366,7 @@ async def run_compare(
         allow_unknown_cost: The user consented to ``cli`` calls of unknown cost that
             count against their plan's usage limits. Required for any ``cli`` member.
         attachment_ids: Uploaded attachments sent to every member (ADR 0007).
+        on_member: Progress hook, see :func:`execute_calls`.
 
     Raises:
         SelectionError, ResolutionError, PricingError: see :func:`prepare_calls`.
@@ -1321,5 +1382,9 @@ async def run_compare(
     if status.refused:
         raise BudgetRefusedError(status.refusal_reason or "Refused by the budget.", status)
     return await execute_calls(
-        run_id or new_run_id(), prepared, deps, allow_unknown_cost=allow_unknown_cost
+        run_id or new_run_id(),
+        prepared,
+        deps,
+        allow_unknown_cost=allow_unknown_cost,
+        on_member=on_member,
     )

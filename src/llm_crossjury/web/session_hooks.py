@@ -25,8 +25,11 @@ from llm_crossjury.core.compare_service import (
     CompareDeps,
     CompareResult,
     ConsentRequiredError,
+    MemberCallback,
+    MemberResult,
     Selection,
     SelectionError,
+    replace_member,
 )
 from llm_crossjury.core.cost.pricing import PricingError
 from llm_crossjury.core.registry.resolver import ResolutionError
@@ -36,7 +39,12 @@ from llm_crossjury.core.sessions.interfaces import (
     SessionStoreLike,
     TaskRunnerLike,
 )
-from llm_crossjury.core.sessions.models import JuryTurn, Session, TurnStatus
+from llm_crossjury.core.sessions.models import (
+    SYNTHESIS_STAGES,
+    JuryTurn,
+    Session,
+    TurnStatus,
+)
 from llm_crossjury.core.sessions.store import INTERRUPTED_ERROR, is_session_id
 from llm_crossjury.core.synthesis_service import SynthesisStageError
 from llm_crossjury.web.sessions_api import (
@@ -152,6 +160,21 @@ def _update_turn(
         return
 
 
+def member_writer(ctx: AppContext, session_id: str, turn_id: str) -> MemberCallback:
+    """A progress hook that stores each finished step-1 member in ``turn.members_done``
+    (so a page can show answers before the slowest member is done)."""
+
+    def write(index: int, member: MemberResult) -> None:
+        def apply(turn: JuryTurn) -> JuryTurn:
+            done = dict(turn.members_done)
+            done[index] = member
+            return turn.model_copy(update={"members_done": done})
+
+        _update_turn(ctx, session_id, turn_id, apply)
+
+    return write
+
+
 async def run_jury_turn(
     ctx: AppContext,
     session_id: str,
@@ -224,7 +247,142 @@ def check_stage_target(
         return turn_not_found()
     if "pending" in turn.synthesis and ctx.tasks.running(_stage_key(found.id, turn_id)):
         return error(409, "turn_busy", "A synthesis step is still running for this turn.")
+    if _retrying(ctx, found.id, turn):
+        return error(409, "turn_busy", "A member answer is being run again for this turn.")
     return None
+
+
+# --------------------------------------------------------------------------- member retry
+
+
+def _member_key(session_id: str, turn_id: str, index: int) -> str:
+    return f"{session_id}/{turn_id}/member/{index}"
+
+
+def _retrying(ctx: AppContext, session_id: str, turn: JuryTurn) -> bool:
+    """Some member of ``turn`` is being re-run (a stale index after a restart is not)."""
+    return any(ctx.tasks.running(_member_key(session_id, turn.id, i)) for i in turn.retrying)
+
+
+def find_member_target(
+    ctx: AppContext, session_id: str | None, turn_id: str | None, index: int
+) -> tuple[Session, JuryTurn] | JSONResponse:
+    """The session and jury turn of a member retry or its estimate, or the error.
+
+    Errors: the usual session and turn id errors, 404 ``turn_not_found`` for a missing
+    or chat turn, 409 ``turn_busy`` while step 1 is running, 409 ``no_answers`` when
+    step 1 failed as a whole, and 400 ``invalid_member_index``.
+    """
+    found = _jury_turn(ctx, session_id, turn_id)
+    if isinstance(found, JSONResponse):
+        return found
+    _, turn = found
+    if turn.status is TurnStatus.PENDING:
+        return error(409, "turn_busy", "Step 1 is still running for this turn.")
+    if turn.step1 is None:
+        return error(409, "no_answers", "This turn has no step-1 answers to run again.")
+    if not 0 <= index < min(len(turn.selections), len(turn.step1.members)):
+        return error(400, "invalid_member_index", "There is no member with this index.")
+    return found
+
+
+def _jury_turn(
+    ctx: AppContext, session_id: str | None, turn_id: str | None
+) -> tuple[Session, JuryTurn] | JSONResponse:
+    found = get_session(ctx, session_id)
+    if isinstance(found, JSONResponse):
+        return found
+    if turn_id is None or not is_session_id(turn_id):
+        return invalid_turn_id()
+    turn = _find_turn(found, turn_id)
+    if turn is None:
+        return turn_not_found()
+    return found, turn
+
+
+def check_member_busy(
+    ctx: AppContext, session_id: str, turn: JuryTurn, index: int
+) -> JSONResponse | None:
+    """Refuse a retry while that member is already re-running or step 2 is running."""
+    if index in turn.retrying and ctx.tasks.running(_member_key(session_id, turn.id, index)):
+        return error(409, "turn_busy", "This member is already running again.")
+    if "pending" in turn.synthesis and ctx.tasks.running(_stage_key(session_id, turn.id)):
+        return error(409, "turn_busy", "A synthesis step is still running for this turn.")
+    return None
+
+
+def _find_turn(session: Session, turn_id: str) -> JuryTurn | None:
+    turn = next((t for t in session.turns if t.id == turn_id), None)
+    return turn if isinstance(turn, JuryTurn) else None
+
+
+async def run_member_retry(
+    ctx: AppContext,
+    session_id: str,
+    turn_id: str,
+    index: int,
+    work: Coroutine[Any, Any, CompareResult],
+) -> tuple[MemberResult, JuryTurn | None]:
+    """Mark member ``index`` as retrying, run ``work`` (a one-member compare) detached,
+    and store its result in the turn.
+
+    On success the member replaces ``step1.members[index]`` and
+    ``members_done[index]``, the step-1 totals are recomputed, and
+    ``synthesis_stale`` is set when step 2 has any result. On failure the old member
+    is kept. ``index`` leaves ``retrying`` in both cases.
+
+    Returns:
+        The new member and the updated turn (``None`` if it was deleted meanwhile).
+    """
+
+    def start(turn: JuryTurn) -> JuryTurn:
+        retrying = tuple(sorted({*turn.retrying, index}))
+        return turn.model_copy(update={"retrying": retrying})
+
+    try:
+        ctx.sessions.update(session_id, _replace_turn(turn_id, start))
+    except BaseException:
+        work.close()
+        raise
+
+    def stop(turn: JuryTurn) -> JuryTurn:
+        return turn.model_copy(update={"retrying": tuple(i for i in turn.retrying if i != index)})
+
+    def store(member: MemberResult) -> Callable[[JuryTurn], JuryTurn]:
+        def apply(turn: JuryTurn) -> JuryTurn:
+            turn = stop(turn)
+            if turn.step1 is None or not 0 <= index < len(turn.step1.members):
+                return turn
+            done = dict(turn.members_done)
+            done[index] = member
+            has_step2 = any(stage in turn.synthesis for stage in SYNTHESIS_STAGES)
+            return turn.model_copy(
+                update={
+                    "step1": replace_member(turn.step1, index, member),
+                    "members_done": done,
+                    "synthesis_stale": turn.synthesis_stale or has_step2,
+                }
+            )
+
+        return apply
+
+    async def detached() -> tuple[MemberResult, JuryTurn | None]:
+        try:
+            result = await work
+        except BaseException:
+            _update_turn(ctx, session_id, turn_id, stop)
+            raise
+        (member,) = result.members
+        try:
+            session = ctx.sessions.update(session_id, _replace_turn(turn_id, store(member)))
+        except LookupError:
+            return member, None
+        return member, _find_turn(session, turn_id)
+
+    outcome: tuple[MemberResult, JuryTurn | None] = await ctx.tasks.run(
+        _member_key(session_id, turn_id, index), detached()
+    )
+    return outcome
 
 
 async def run_stage(
@@ -240,7 +398,7 @@ async def run_stage(
         synthesis = dict(turn.synthesis)
         synthesis["pending"] = stage
         synthesis.pop(f"{stage}_error", None)
-        return turn.model_copy(update={"synthesis": synthesis})
+        return turn.model_copy(update={"synthesis": synthesis, "synthesis_stale": False})
 
     try:
         ctx.sessions.update(session_id, _replace_turn(turn_id, start))
@@ -274,10 +432,14 @@ async def run_stage(
 __all__ = [
     "AppContext",
     "case_file_for",
+    "check_member_busy",
     "check_new_turn",
     "check_stage_target",
+    "find_member_target",
     "get_session",
+    "member_writer",
     "run_jury_turn",
+    "run_member_retry",
     "run_stage",
     "turn_error_message",
     "with_context",

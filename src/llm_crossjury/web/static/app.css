@@ -716,6 +716,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--cobalt); width
 .skeleton:nth-child(5) { width: 84%; }
 @keyframes pulse { 50% { opacity: 0.45; } }
 
+.retry-status { padding: 8px 16px; border-bottom: 1px solid var(--rule); background: var(--panel-2); }
+.answer.is-retrying .answer-body,
+.answer.is-retrying .answer-error { opacity: 0.55; }
+.answer-foot .btn-retry { margin-left: auto; }
+.answer-foot .btn-retry .icon { width: 16px; height: 16px; }
+.answer.has-error .btn-retry { border-color: var(--err); }
+.syn-stale { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--warn); border-radius: var(--r-ctl); }
+
 .answer-error { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; }
 .answer-error-title { display: flex; gap: 8px; align-items: center; color: var(--err); font-weight: 600; }
 

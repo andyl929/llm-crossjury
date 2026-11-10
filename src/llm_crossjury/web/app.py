@@ -14,7 +14,11 @@ Serves one static page (vanilla HTML/CSS/JS, no build step) and a small JSON API
   needed, or refused).
 * ``POST /api/run``: runs the comparison and returns every member's result, including
   how each member received each attachment. A run with CLI members needs
-  ``allow_unknown_cost`` (409 ``consent_required`` otherwise).
+  ``allow_unknown_cost`` (409 ``consent_required`` otherwise). With a session, each
+  member is stored in ``turn.members_done`` as soon as it finishes.
+* ``POST /api/run/member?session=S&turn=T`` (``{"index", "allow_unknown_cost",
+  "confirmed"}``): runs one member of a stored jury turn again, with the same
+  pre-checks as ``/api/run``; ``POST /api/run/member/estimate`` estimates that call.
 * ``POST /api/attachments`` (multipart) and ``DELETE /api/attachments/{id}``: upload
   and remove task attachments (see :mod:`llm_crossjury.web.attachments_api`); estimate,
   run and synthesis requests refer to them by ``attachment_ids``.
@@ -72,8 +76,10 @@ from llm_crossjury.core.compare_service import (
     BudgetRefusedError,
     BudgetStatus,
     CompareDeps,
+    CompareEstimateDetails,
     CompareResult,
     ConsentRequiredError,
+    MemberResult,
     Selection,
     SelectionError,
     budget_status,
@@ -92,6 +98,7 @@ from llm_crossjury.core.memory.index import MemoryIndex, open_index
 from llm_crossjury.core.providers.base import Backend, ProviderStatus
 from llm_crossjury.core.registry.resolver import ResolutionError
 from llm_crossjury.core.sessions.interfaces import CaseFileBuilder, TaskRunnerLike
+from llm_crossjury.core.sessions.models import JuryTurn
 from llm_crossjury.core.sessions.store import SessionStore
 from llm_crossjury.core.sessions.tasks import TaskRunner
 from llm_crossjury.core.storage import DataDirError, resolve_data_paths
@@ -350,6 +357,31 @@ class RunRequest(CompareRequest):
     """The user confirmed a run whose high estimate exceeds ``confirm_above``."""
     allow_unknown_cost: bool = False
     """The user ticked the consent box for subscription (CLI) members."""
+
+
+class MemberEstimateRequest(_Frozen):
+    """Body of ``POST /api/run/member/estimate``: which member of the turn."""
+
+    index: int
+    """Index into the turn's selections (and ``step1.members``)."""
+
+
+class MemberRetryRequest(MemberEstimateRequest):
+    """Body of ``POST /api/run/member``."""
+
+    confirmed: bool = False
+    """The user accepted a high estimate above the confirmation threshold."""
+    allow_unknown_cost: bool = False
+    """Consent to a ``cli`` call of unknown cost (ADR 0003)."""
+
+
+class MemberRetryResponse(_Frozen):
+    """Result of ``POST /api/run/member``."""
+
+    index: int
+    member: MemberResult
+    turn: JuryTurn | None
+    """The updated turn (``None`` if the session was deleted meanwhile)."""
 
 
 class EstimateLineOut(_Frozen):
@@ -776,6 +808,87 @@ def _add_guard(app: FastAPI, hosts: frozenset[str]) -> None:
         return response
 
 
+def _estimate_response(details: CompareEstimateDetails, d: CompareDeps) -> EstimateResponse:
+    est = details.estimate
+    warnings = tuple(w for r in est.resolved for w in r.warnings) + details.refusals
+    status = budget_status(est, d)
+    return EstimateResponse(
+        currency=est.currency or d.budget.currency,
+        total_low=est.total_low,
+        total_high=est.total_high,
+        cli_calls=status.cli_calls,
+        lines=tuple(
+            EstimateLineOut(
+                provider=line.provider,
+                backend=line.backend,
+                model=line.model,
+                calls=line.calls,
+                cost_low=line.cost_low,
+                cost_high=line.cost_high,
+            )
+            for line in est.lines
+        ),
+        attachments=details.attachments,
+        warnings=warnings,
+        assumptions=est.assumptions,
+        budget=status,
+    )
+
+
+def _add_member_retry_routes(app: FastAPI, ctx: AppContext) -> None:
+    """Register ``/api/run/member`` and ``/api/run/member/estimate`` (per-member retry)."""
+    deps = ctx.deps
+
+    @app.post("/api/run/member/estimate", response_model=None)
+    async def member_estimate(
+        body: MemberEstimateRequest, session: str | None = None, turn: str | None = None
+    ) -> EstimateResponse | JSONResponse:
+        found = hooks.find_member_target(ctx, session, turn, body.index)
+        if isinstance(found, JSONResponse):
+            return found
+        _, jury = found
+        d = deps()
+        details = await estimate_compare_details(
+            hooks.with_context(jury.task, jury.case_file),
+            (jury.selections[body.index],),
+            d,
+            attachment_ids=jury.attachment_ids,
+        )
+        return _estimate_response(details, d)
+
+    @app.post("/api/run/member", response_model=None)
+    async def member_retry(
+        body: MemberRetryRequest, session: str | None = None, turn: str | None = None
+    ) -> MemberRetryResponse | JSONResponse:
+        found = hooks.find_member_target(ctx, session, turn, body.index)
+        if isinstance(found, JSONResponse):
+            return found
+        stored, jury = found
+        if (busy := hooks.check_member_busy(ctx, stored.id, jury, body.index)) is not None:
+            return busy
+        task = hooks.with_context(jury.task, jury.case_file)
+        selection = (jury.selections[body.index],)
+        d = deps()
+        status = budget_status(
+            await estimate_compare(task, selection, d, attachment_ids=jury.attachment_ids), d
+        )
+        if status.cli_calls and not body.allow_unknown_cost:
+            return _consent_error(ConsentRequiredError(status.cli_calls), status)
+        if status.refused:
+            raise BudgetRefusedError(status.refusal_reason or "Refused by the budget.", status)
+        if status.needs_confirmation and not body.confirmed:
+            return _confirmation_error(status)
+        work = run_compare(
+            task,
+            selection,
+            d,
+            allow_unknown_cost=body.allow_unknown_cost,
+            attachment_ids=jury.attachment_ids,
+        )
+        member, updated = await hooks.run_member_retry(ctx, stored.id, jury.id, body.index, work)
+        return MemberRetryResponse(index=body.index, member=member, turn=updated)
+
+
 def _add_compare_routes(
     app: FastAPI,
     ctx: AppContext,
@@ -818,30 +931,7 @@ def _add_compare_routes(
         details = await estimate_compare_details(
             task, body.selections, d, attachment_ids=body.attachment_ids
         )
-        est = details.estimate
-        warnings = tuple(w for r in est.resolved for w in r.warnings) + details.refusals
-        status = budget_status(est, d)
-        return EstimateResponse(
-            currency=est.currency or d.budget.currency,
-            total_low=est.total_low,
-            total_high=est.total_high,
-            cli_calls=status.cli_calls,
-            lines=tuple(
-                EstimateLineOut(
-                    provider=line.provider,
-                    backend=line.backend,
-                    model=line.model,
-                    calls=line.calls,
-                    cost_low=line.cost_low,
-                    cost_high=line.cost_high,
-                )
-                for line in est.lines
-            ),
-            attachments=details.attachments,
-            warnings=warnings,
-            assumptions=est.assumptions,
-            budget=status,
-        )
+        return _estimate_response(details, d)
 
     @app.post("/api/run", response_model=None)
     async def run(
@@ -869,15 +959,22 @@ def _add_compare_routes(
             raise BudgetRefusedError(status.refusal_reason or "Refused by the budget.", status)
         if status.needs_confirmation and not body.confirmed:
             return _confirmation_error(status)
+        if session is None or turn is None:
+            return await run_compare(
+                task,
+                body.selections,
+                d,
+                allow_unknown_cost=body.allow_unknown_cost,
+                attachment_ids=body.attachment_ids,
+            )
         work = run_compare(
             task,
             body.selections,
             d,
             allow_unknown_cost=body.allow_unknown_cost,
             attachment_ids=body.attachment_ids,
+            on_member=hooks.member_writer(ctx, session, turn),
         )
-        if session is None or turn is None:
-            return await work
         return await hooks.run_jury_turn(
             ctx,
             session,
@@ -1069,6 +1166,7 @@ def create_app(
     _add_error_handlers(app)
     cli_checks = CliCheckCache()
     _add_compare_routes(app, ctx, files, demo=demo, cli_checks=cli_checks)
+    _add_member_retry_routes(app, ctx)
 
     _add_synthesis_routes(app, ctx)
     app.include_router(create_attachments_router(lambda: deps().attachment_store))

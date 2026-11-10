@@ -18,6 +18,7 @@
   const LAST_KEY = "llm-crossjury-session";
   const SIDEBAR_KEY = "llm-crossjury-sidebar";
   const POLL_MS = 2000;
+  const WATCH_MS = 1000;
   const LIST_POLL_MS = 10000;
   const NARROW = "(max-width: 899px)";
 
@@ -106,7 +107,8 @@
 
   function pending(turn) {
     if (turn.status === "pending") return true;
-    return turn.kind === "jury" && !!(turn.synthesis && turn.synthesis.pending);
+    if (turn.kind !== "jury") return false;
+    return !!(turn.synthesis && turn.synthesis.pending) || (Array.isArray(turn.retrying) && turn.retrying.length > 0);
   }
 
   function schedulePoll() {
@@ -135,6 +137,36 @@
       }
     }
     schedulePoll();
+  }
+
+  // While this page awaits POST /api/run for a jury turn, the turn keeps its local
+  // copy (S.busy). Watch the server copy every second and take over only the members
+  // that finished (members_done), so the cards appear one by one; nothing else of the
+  // local turn changes, and the run's own response still wins when it arrives.
+  function watchTurn(id) {
+    if (!available()) return () => {};
+    let active = true;
+    let timer = null;
+    const tick = async () => {
+      timer = null;
+      const sid = S.current.id;
+      if (!active || !sid) return;
+      try {
+        const data = await api("/api/sessions/" + encodeURIComponent(sid));
+        const st = active && S.current.id === sid ? (data.turns || []).find((t) => t.id === id) : null;
+        const lt = st ? turnById(id) : null;
+        if (st && lt && lt.kind === "jury" && lt.status === "pending") {
+          const got = st.members_done || {};
+          if (Object.keys(got).length > Object.keys(lt.members_done || {}).length) {
+            S.current.turns = S.current.turns.map((t) => (t.id === id ? Object.assign({}, t, { members_done: got }) : t));
+            renderThread();
+          }
+        }
+      } catch (_) { /* the run's own response still arrives */ }
+      if (active) timer = setTimeout(tick, WATCH_MS);
+    };
+    timer = setTimeout(tick, WATCH_MS);
+    return () => { active = false; clearTimeout(timer); };
   }
 
   // Refresh now (e.g. back from another tab): a poll outside the 2 s rhythm.
@@ -545,6 +577,7 @@
     setBusy: setBusy,
     hasTurns: hasTurns,
     schedulePoll: schedulePoll,
+    watchTurn: watchTurn,
     refresh: refresh,
     refreshList: refreshListSoon,
     start: start,
