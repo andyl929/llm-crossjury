@@ -143,6 +143,10 @@ Design direction: precise, calm, tool-like. Think instrument panel, not marketin
 
 ### M4: README as a product page
 
+Status (2026-11-10): README v2 done (conversation UI media, SVG loop diagram,
+comparison, FAQ). Still open: download buttons and `uvx` once M1/M2 ship, CI and
+PyPI badges once the repository is public, star-history chart after launch.
+
 Structure (top to bottom):
 
 1. Logo, one-line value proposition, badges (CI, release, license, downloads).

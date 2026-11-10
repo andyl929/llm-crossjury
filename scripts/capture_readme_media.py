@@ -126,7 +126,7 @@ SEL: dict[str, str] = {
     "jury_panel": "#jury-panel",
     "estimate": "#estimate",
     "consent": "#consent",
-    "dock": ".dock",
+    "composer": "#composer",
     "attach_input": "#attach-input",
     "attach_list": "#attach-list",
     "history": "#history",
@@ -203,9 +203,10 @@ window.__cap = {
     return el.getBoundingClientRect().top - base + s.scrollTop;
   },
   maxScroll() { const s = this.scroller(); return s.scrollHeight - s.clientHeight; },
-  viewBottom() {
+  viewBottom(el) {
     const s = this.scroller();
-    return s === document.scrollingElement ? window.innerHeight : s.getBoundingClientRect().bottom;
+    if (s === document.scrollingElement || !s.contains(el)) return window.innerHeight;
+    return s.getBoundingClientRect().bottom;
   },
 };
 """
@@ -485,9 +486,9 @@ class Page:
     ) -> dict[str, float]:
         """Page-coordinate clip around an element (optionally capped in height)."""
         rect = self.js(
-            f"(() => {{ const r = {self.el(key)}.getBoundingClientRect();"
+            f"(() => {{ const e = {self.el(key)}; const r = e.getBoundingClientRect();"
             " return [r.left + window.scrollX, r.top + window.scrollY, r.width, r.height,"
-            " window.__cap.viewBottom() + window.scrollY]; })()"
+            " window.__cap.viewBottom(e) + window.scrollY]; })()"
         )
         x, y, w, h, bottom = (float(v) for v in rect)
         # Inside a scroll container only the visible part is painted: stop at its edge.
@@ -889,7 +890,7 @@ def conversation_stills(page: Page, base: str, shots: Shots, banner: bool) -> No
     synthesis_ready(page)
     run_synthesis(page, None)
     shots.capture("synthesis", "final", max_height=900)
-    shots.capture("additional-list", "additional")
+    shots.capture("additional-list", "additional", max_height=760)
     continue_chat(page, None)
     page.resize(page.width, 860)
     time.sleep(0.3)
@@ -938,7 +939,7 @@ def attachments_still(
         f"{len(samples)} && !document.querySelector('#attach-list .spinner')"
     )
     time.sleep(0.3)
-    shots.capture("attachments", "dock", scroll=False)
+    shots.capture("attachments", "composer", scroll=False)
     page.resize(page.width, STILL_HEIGHT)
 
 

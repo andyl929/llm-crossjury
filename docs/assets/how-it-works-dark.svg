@@ -57,10 +57,10 @@
   <text class="hot-t" x="280.0" y="384" text-anchor="middle">One final answer from a chair model</text>
   <text class="hot-s" x="280.0" y="404" text-anchor="middle">with a list of disputed points, possibly</text>
   <text class="hot-s" x="280.0" y="421" text-anchor="middle">wrong claims and insights it left out</text>
-  <path class="dash" d="M450 231 C492 231 492 396 452 396" marker-end="url(#a)"/>
-  <text class="s" x="496" y="306" text-anchor="end">skip</text>
-  <text class="s" x="502" y="322" text-anchor="end">if 80%</text>
-  <text class="s" x="500" y="338" text-anchor="end">agree</text>
+  <path class="dash" d="M450 231 C470 231 470 396 452 396" marker-end="url(#a)"/>
+  <text class="s" x="474" y="306">skip</text>
+  <text class="s" x="474" y="322">if 80%</text>
+  <text class="s" x="474" y="338">agree</text>
   <path class="ln" d="M280 432 L280 476" marker-end="url(#a)"/>
   <text class="lbl" x="290" y="462">Step 3</text>
   <rect class="box" x="110" y="478" width="340" height="54" rx="6"/>
