@@ -2,42 +2,59 @@
 
 Manual script. It costs nothing and makes no network call beyond loopback: it starts
 ``llm-crossjury ui --demo`` on a free port, drives the UI in headless Edge or Chrome
-over the DevTools protocol, and writes:
+over the DevTools protocol, and writes to ``docs/assets/``:
 
-* ``docs/assets/hero.gif``: the full flow (ask, pick models, estimate, run, answers,
-  AI synthesize, final answer and additional list), about 25 s, looping;
-* ``docs/assets/<name>-light.png`` and ``<name>-dark.png`` for ``compare``,
-  ``synthesis``, ``additional-list``, ``estimate``, ``attachments``, ``subscription``
-  and ``settings``;
-* ``docs/assets/hero.mp4`` when ``ffmpeg`` is on PATH (skipped otherwise).
+* ``hero.gif``: the full loop in the conversation UI: ask the jury, the answers side by
+  side, AI synthesize, the final answer and the additional list, then "Continue with"
+  one model and a chat reply (about 30 s, looping);
+* ``<name>-light.png`` and ``<name>-dark.png`` for every name in :data:`STILLS`;
+* ``hero.mp4`` when ``ffmpeg`` is on PATH (skipped otherwise).
 
 Usage::
 
-    uv run python scripts/capture_readme_media.py            # everything
-    uv run python scripts/capture_readme_media.py --no-gif   # screenshots only
+    uv run python scripts/capture_readme_media.py              # everything
+    uv run python scripts/capture_readme_media.py --no-gif     # screenshots only
+    uv run python scripts/capture_readme_media.py --no-stills  # hero.gif only
+    uv run python scripts/capture_readme_media.py --only wizard --only models
     uv run python scripts/capture_readme_media.py --browser "C:/path/to/chrome.exe"
 
 Dependencies: only what the project already installs (``websockets`` for the DevTools
 connection, Pillow for the GIF, ``python-docx`` for the sample Word file). The sample
 attachments are generated at run time.
 
-What the script expects from the UI (update :data:`SEL` after a redesign):
+**After a UI change**, run the script and look at the images. If it stops with
+``timed out waiting for ...`` or ``missing element``, the message names the key in
+:data:`SEL`; update that selector (and, for buttons, :data:`BUTTON_TEXT`, the fallback
+used when the selector finds nothing). What the script relies on:
 
-* the task textarea ``#task``;
-* one checkbox per provider ``#use-<provider>`` and, for subscription-capable
-  providers, a radio ``input[name="backend-<provider>"][value="cli"]``;
-* the buttons ``#estimate-btn``, ``#run-btn`` and ``#syn-btn`` (falls back to a button
-  whose text starts with "Estimate", "Run" or "AI synthesize");
-* the regions ``#estimate``, ``#results-section``, ``#synthesis-section``,
-  ``#syn-result`` (with an ``.additional`` block), ``#providers`` and ``#task-panel``;
-* the file input ``#attach-input`` and the list ``#attach-list``;
-* dark mode via ``prefers-color-scheme`` (the script emulates it);
-* the demo banner ``#demo-banner``, which the script hides (``--show-banner`` keeps it).
+* home page (``/``): the scroll container ``#main`` (the page itself does not scroll),
+  the composer ``#task``, ``#estimate-btn``, ``#run-btn`` ("Ask models"), ``#send-btn``,
+  the jury panel ``#jury-panel`` with one checkbox ``#use-<provider>`` per provider and a
+  radio ``input[name="backend-<provider>"][value="cli"]`` for subscriptions, the history
+  list ``#history`` and the file input ``#attach-input`` / list ``#attach-list``;
+* a jury turn ``.turn-jury`` with ``.jury-card``, one ``article.answer`` per member (an
+  ``.answer-body`` once answered, ``.pending`` or ``aria-busy`` while waiting) and a
+  ``.btn-continue`` button per answer; its synthesis panel ``.panel.synthesis`` with
+  ``.syn-btn``, an optional ``.decision`` ("Continue with review"), and the result
+  ``.synth-result`` holding ``.final`` and ``.additional``; the subscription consent
+  checkbox ``#consent``;
+* a chat turn ``.turn-chat`` whose reply is ``.bubble-model``;
+* the setup wizard on ``/settings?onboarding=1``: ``#wizard``, ``#wizard-next`` and the
+  subscription rows ``#cli-rows``;
+* dark mode via ``prefers-color-scheme`` (the script emulates it, and also emulates
+  ``prefers-reduced-motion: reduce`` so the page scrolls instantly);
+* the demo labels ``#demo-badge`` (home) and ``#demo-banner`` (settings), which the
+  script hides (``--show-banner`` keeps them).
+
+The jury cards may render answers one by one and offer a retry per member: the script
+only waits until every selected member shows an answer body and nothing is pending.
 
 Determinism: the demo server starts with an empty temporary data dir, the providers
 are deterministic, the label shuffle seed is pinned (the script injects ``seed`` into
 synthesis requests), and frame timings are scripted. Only the measured latency shown
-per answer can differ by a tenth of a second between runs.
+per answer can differ by a tenth of a second between runs. The history sidebar is
+seeded with a few example conversation titles (:data:`HISTORY_TITLES`) through the
+demo server's own API.
 """
 
 from __future__ import annotations
@@ -67,9 +84,19 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = ROOT / "docs" / "assets"
 KEY_ENVS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY")
 PROVIDERS = ("anthropic", "openai", "gemini", "xai")
+CONTINUE_INDEX = 1
+"""Which answer's "Continue with" button the flow clicks (0-based; 1 = OpenAI)."""
 MIN_SCROLL_PX = 2
 SEED = 20261108
 """Label shuffle seed injected into synthesis requests, so labels are stable."""
+HISTORY_TITLES = (
+    "Mixed model or repeated-measures ANOVA for my pilot data?",
+    "Check the induction step in Lemma 2 of my draft",
+    "Summarize the methods section of the attached paper",
+)
+"""Older conversations created before the capture, oldest first (demo data only)."""
+STILL_HEIGHT = 1500
+"""Viewport height for element stills, so a tall element fits without inner scrolling."""
 
 BROWSER_CANDIDATES = (
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -89,28 +116,65 @@ BROWSER_NAMES = (
 )
 
 SEL: dict[str, str] = {
+    # home page: composer and jury panel
     "task": "#task",
     "use": "#use-{provider}",
     "backend": 'input[name="backend-{provider}"][value="{backend}"]',
     "estimate_btn": "#estimate-btn",
     "run_btn": "#run-btn",
-    "syn_btn": "#syn-btn",
+    "send_btn": "#send-btn",
+    "jury_panel": "#jury-panel",
     "estimate": "#estimate",
-    "actions": ".actions-panel",
-    "results": "#results-section",
-    "synthesis": "#synthesis-section",
-    "syn_result": "#syn-result",
-    "additional": "#syn-result .additional",
-    "providers": "#providers",
-    "task_panel": "#task-panel",
+    "consent": "#consent",
+    "composer": "#composer",
     "attach_input": "#attach-input",
     "attach_list": "#attach-list",
-    "banner": "#demo-banner",
+    "history": "#history",
+    # jury turn
+    "jury_turn": ".turn-jury",
+    "jury_card": ".turn-jury .jury-card",
+    "answer_body": ".turn-jury article.answer .answer-body",
+    "pending": ".turn-jury .answers .pending, .turn-jury .answers [aria-busy='true']",
+    "continue_btn": ".turn-jury article.answer .btn-continue",
+    "synthesis": ".turn-jury .panel.synthesis",
+    "syn_btn": ".turn-jury .syn-btn",
+    "decision": ".turn-jury .decision:not([hidden])",
+    "review_btn": ".turn-jury .decision:not([hidden]) .btn-review",
+    "syn_result": ".turn-jury .synth-result:not([hidden])",
+    "final": ".turn-jury .synth-result .final",
+    "additional": ".turn-jury .synth-result .additional",
+    # chat turn
+    "chat_turn": ".turn-chat",
+    "chat_reply": ".turn-chat .bubble-model",
+    # settings page: setup wizard
+    "wizard": "#wizard",
+    "wizard_next": "#wizard-next",
+    "cli_rows": "#cli-rows",
+    # demo labels and overlays (hidden unless --show-banner)
+    "banner": "#demo-banner, #demo-badge",
+    "tour": ".tour, .tour-ring",
 }
 """CSS selectors the script relies on (see the module docstring)."""
 
-BUTTON_TEXT = {"estimate_btn": "Estimate", "run_btn": "Run", "syn_btn": "AI synthesize"}
-"""Fallback: a button whose text starts with this, if the selector finds nothing."""
+BUTTON_TEXT = {
+    "estimate_btn": "Estimate",
+    "run_btn": "Ask models",
+    "send_btn": "Send",
+    "syn_btn": "AI synthesize",
+    "review_btn": "Continue with review",
+}
+"""Fallback: a visible button whose text starts with this, if the selector finds nothing."""
+
+STILLS = (
+    "answers",
+    "synthesis",
+    "additional-list",
+    "conversation",
+    "models",
+    "attachments",
+    "wizard",
+)
+"""Screenshot names, written as ``<name>-light.png`` and ``<name>-dark.png``."""
 
 PAGE_HELPERS = """
 window.__cap = {
@@ -119,7 +183,8 @@ window.__cap = {
     if (!el && text) {
       const want = text.toLowerCase();
       el = [...document.querySelectorAll('button, [role="button"], a')]
-        .find((b) => b.textContent.trim().toLowerCase().startsWith(want)) || null;
+        .find((b) => b.offsetParent !== null
+          && b.textContent.trim().toLowerCase().startsWith(want)) || null;
     }
     return el;
   },
@@ -128,6 +193,20 @@ window.__cap = {
     if (el.closest('[hidden]')) return false;
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
+  },
+  scroller() {
+    return document.querySelector('#main.thread-scroll') || document.scrollingElement;
+  },
+  top(el) {
+    const s = this.scroller();
+    const base = s === document.scrollingElement ? 0 : s.getBoundingClientRect().top;
+    return el.getBoundingClientRect().top - base + s.scrollTop;
+  },
+  maxScroll() { const s = this.scroller(); return s.scrollHeight - s.clientHeight; },
+  viewBottom(el) {
+    const s = this.scroller();
+    if (s === document.scrollingElement || !s.contains(el)) return window.innerHeight;
+    return s.getBoundingClientRect().bottom;
   },
 };
 """
@@ -151,22 +230,6 @@ window.confirm = () => true;
   };
 })();
 """.replace("__SEED__", str(SEED))
-
-
-MASK_PATHS = r"""
-(() => {
-  // The demo key store lives in a temp dir whose path names the local user: mask it.
-  const re = /(?:[A-Za-z]:\\|\/)\S*?keys\.env/g;
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    if (re.test(n.nodeValue)) {
-      n.nodeValue = n.nodeValue.replace(re, "<user config dir>/llm-crossjury/keys.env");
-    }
-    re.lastIndex = 0;
-  }
-  return true;
-})()
-"""
 
 
 # --------------------------------------------------------------------------- processes
@@ -323,21 +386,37 @@ class Page:
             time.sleep(interval_s)
         raise TimeoutError(f"timed out waiting for {expression}")
 
+    def resize(self, width: int, height: int) -> None:
+        """Change the emulated viewport."""
+        self.width, self.height = width, height
+        self.send(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False},
+        )
+
     def goto(self, url: str, ready: str, *, show_banner: bool) -> None:
-        """Navigate and wait until ``ready`` is truthy; hide the demo banner."""
+        """Navigate and wait until ``ready`` is truthy; hide the demo labels and the tour."""
         self.send("Page.navigate", {"url": url})
         self.wait("document.readyState === 'complete' && !!window.__cap")
         self.wait(ready)
-        if not show_banner:
-            self.js(f"document.querySelector({json.dumps(SEL['banner'])})?.remove()")
+        time.sleep(0.3)  # the tour, if any, opens on the next animation frame
+        self.js("window.CJ && window.CJ.tour && window.CJ.tour.close && window.CJ.tour.close()")
+        hide = ["tour"] if show_banner else ["tour", "banner"]
+        for key in hide:
+            self.js(f"document.querySelectorAll({json.dumps(SEL[key])}).forEach((e) => e.remove())")
         self.js("document.fonts ? document.fonts.ready.then(() => true) : true", await_promise=True)
 
     def theme(self, dark: bool) -> None:
-        """Emulate ``prefers-color-scheme``."""
+        """Emulate ``prefers-color-scheme`` (and reduced motion, for instant scrolling)."""
         value = "dark" if dark else "light"
         self.send(
             "Emulation.setEmulatedMedia",
-            {"features": [{"name": "prefers-color-scheme", "value": value}]},
+            {
+                "features": [
+                    {"name": "prefers-color-scheme", "value": value},
+                    {"name": "prefers-reduced-motion", "value": "reduce"},
+                ]
+            },
         )
 
     def screenshot(self, clip: dict[str, float] | None = None) -> bytes:
@@ -345,7 +424,8 @@ class Page:
         params: dict[str, Any] = {"format": "png", "fromSurface": True}
         if clip is not None:
             params["clip"] = {**clip, "scale": 1}
-            params["captureBeyondViewport"] = True
+            # Never beyond the viewport: that re-lays out the page at the clip's size.
+            params["captureBeyondViewport"] = False
         return base64.b64decode(self.send("Page.captureScreenshot", params)["data"])
 
     # -- element helpers
@@ -359,11 +439,23 @@ class Page:
     def exists(self, key: str, **fmt: str) -> bool:
         return bool(self.js(f"!!{self.el(key, **fmt)}"))
 
+    def count(self, key: str) -> str:
+        """JS expression: how many elements match ``SEL[key]``."""
+        return f"document.querySelectorAll({json.dumps(SEL[key])}).length"
+
     def visible(self, key: str, **fmt: str) -> str:
         return f"window.__cap.visible({self.el(key, **fmt)})"
 
-    def click(self, key: str, **fmt: str) -> None:
-        self.js(f"(() => {{ const e = {self.el(key, **fmt)}; e.click(); return true; }})()")
+    def click(self, key: str, index: int | None = None, **fmt: str) -> None:
+        """Click ``SEL[key]`` (or its ``index``-th match); fail loudly when it is missing."""
+        if index is None:
+            target = self.el(key, **fmt)
+        else:
+            target = f"document.querySelectorAll({json.dumps(SEL[key].format(**fmt))})[{index}]"
+        if not self.js(
+            f"(() => {{ const e = {target}; if (!e) return false; e.click(); return true; }})()"
+        ):
+            raise RuntimeError(f"missing element SEL[{key!r}] = {SEL[key]!r}")
 
     def enabled(self, key: str) -> str:
         return f"(() => {{ const e = {self.el(key)}; return !!e && !e.disabled; }})()"
@@ -375,23 +467,32 @@ class Page:
         )
 
     def scroll_y(self) -> float:
-        return float(self.js("window.scrollY"))
+        """Scroll position of the scroll container (``#main`` on the home page)."""
+        return float(self.js("window.__cap.scroller().scrollTop"))
+
+    def scroll_set(self, y: float) -> None:
+        self.js(f"window.__cap.scroller().scrollTo(0, {y:.1f})")
+
+    def bottom_y(self) -> float:
+        return float(self.js("window.__cap.maxScroll()"))
 
     def target_y(self, key: str, offset: float = 16) -> float:
         """Scroll position that puts the element's top ``offset`` px below the top."""
-        top = self.js(f"{self.el(key)}.getBoundingClientRect().top + window.scrollY")
-        limit = self.js("document.documentElement.scrollHeight - window.innerHeight")
-        return max(0.0, min(float(top) - offset, float(limit)))
+        top = self.js(f"window.__cap.top({self.el(key)})")
+        return max(0.0, min(float(top) - offset, self.bottom_y()))
 
     def clip(
         self, key: str, *, pad: float = 12, max_height: float | None = None
     ) -> dict[str, float]:
         """Page-coordinate clip around an element (optionally capped in height)."""
         rect = self.js(
-            f"(() => {{ const r = {self.el(key)}.getBoundingClientRect();"
-            " return [r.left + window.scrollX, r.top + window.scrollY, r.width, r.height]; })()"
+            f"(() => {{ const e = {self.el(key)}; const r = e.getBoundingClientRect();"
+            " return [r.left + window.scrollX, r.top + window.scrollY, r.width, r.height,"
+            " window.__cap.viewBottom(e) + window.scrollY]; })()"
         )
-        x, y, w, h = (float(v) for v in rect)
+        x, y, w, h, bottom = (float(v) for v in rect)
+        # Inside a scroll container only the visible part is painted: stop at its edge.
+        h = min(h, bottom - y - pad)
         height = h + 2 * pad if max_height is None else min(h + 2 * pad, max_height)
         return {
             "x": max(0.0, x - pad),
@@ -434,7 +535,7 @@ class Recorder:
         for i in range(1, steps + 1):
             t = i / steps
             eased = t * t * (3 - 2 * t)
-            self.page.js(f"window.scrollTo(0, {start + (y - start) * eased:.1f})")
+            self.page.scroll_set(start + (y - start) * eased)
             self.shot(step_ms)
 
     def type_text(
@@ -601,133 +702,211 @@ def make_samples(directory: Path) -> list[Path]:
 # --------------------------------------------------------------------------- flows
 
 
-_FIXED_CHROME_JS = (
-    "document.querySelectorAll('footer.strip').forEach("
-    "(e) => {{ e.style.visibility = '{value}'; }})"
-)
-"""Hide (``hidden``) or restore (``""``) the fixed bottom strip of the compare page."""
-
-
 @dataclass
 class Shots:
     """Writes light and dark stills of the current state."""
 
     page: Page
     out: Path
+    only: frozenset[str] | None = None
     written: list[Path] = field(default_factory=list)
 
-    def capture(self, name: str, key: str, *, max_height: float | None = None) -> None:
-        # Fixed-position chrome (the bottom cost strip) would be painted over the middle
-        # of an element clip; hide it for element stills (visibility keeps the layout).
-        self.page.js(_FIXED_CHROME_JS.format(value="hidden"))
-        try:
-            for dark in (False, True):
-                self.page.theme(dark)
-                time.sleep(0.15)
-                data = self.page.screenshot(self.page.clip(key, max_height=max_height))
-                self.page.screenshot()  # settle the viewport after a beyond-viewport capture
-                path = self.out / f"{name}-{'dark' if dark else 'light'}.png"
-                path.write_bytes(data)
-                self.written.append(path)
-        finally:
-            self.page.js(_FIXED_CHROME_JS.format(value=""))
-            self.page.theme(False)
+    def wanted(self, name: str) -> bool:
+        return self.only is None or name in self.only
 
-    def capture_viewport(self, name: str) -> None:
+    def capture(
+        self, name: str, key: str, *, max_height: float | None = None, scroll: bool = True
+    ) -> None:
+        """Element still: scroll it to the top of its container, then clip around it."""
+        if not self.wanted(name):
+            return
+        if scroll:
+            self.page.scroll_set(self.page.target_y(key, offset=12))
+            time.sleep(0.2)
         for dark in (False, True):
             self.page.theme(dark)
-            time.sleep(0.15)
-            height = self.page.js("document.documentElement.scrollHeight")
-            clip = {"x": 0, "y": 0, "width": self.page.width, "height": float(height)}
-            path = self.out / f"{name}-{'dark' if dark else 'light'}.png"
-            path.write_bytes(self.page.screenshot(clip))
-            self.written.append(path)
+            time.sleep(0.2)
+            data = self.page.screenshot(self.page.clip(key, max_height=max_height))
+            self._write(name, dark, data)
         self.page.theme(False)
 
+    def capture_viewport(self, name: str) -> None:
+        """The whole viewport (sidebar, thread and composer)."""
+        if not self.wanted(name):
+            return
+        for dark in (False, True):
+            self.page.theme(dark)
+            time.sleep(0.2)
+            self._write(name, dark, self.page.screenshot())
+        self.page.theme(False)
 
-def select_models(page: Page, rec: Recorder | None, providers: tuple[str, ...]) -> None:
+    def _write(self, name: str, dark: bool, data: bytes) -> None:
+        path = self.out / f"{name}-{'dark' if dark else 'light'}.png"
+        path.write_bytes(data)
+        self.written.append(path)
+
+
+def seed_history(base: str) -> None:
+    """Create the example conversations listed in :data:`HISTORY_TITLES` (demo only)."""
+    for title in HISTORY_TITLES:
+        request = urllib.request.Request(  # noqa: S310 - loopback demo server
+            base + "/api/sessions",
+            data=json.dumps({"title": title}).encode(),
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+            response.read()
+        time.sleep(0.05)  # distinct updated_at, so the order is stable
+
+
+def open_home(page: Page, base: str, banner: bool) -> None:
+    """A fresh conversation on the home page, with the jury panel loaded."""
+    page.theme(False)
+    page.goto(base + "/", f"!!{page.el('use', provider='xai')}", show_banner=banner)
+    page.js("document.querySelector('#new-chat') && document.querySelector('#new-chat').click()")
+    page.wait(f"!!{page.el('use', provider='xai')}")
+    page.scroll_set(0)
+
+
+def select_models(page: Page, rec: Recorder | None, providers: tuple[str, ...] = PROVIDERS) -> None:
     for provider in providers:
         if not page.js(f"{page.el('use', provider=provider)}.checked"):
             page.click("use", provider=provider)
         if rec is not None:
-            rec.shot(320)
+            rec.shot(260)
 
 
-RESULTS_DONE = "!document.querySelector('#results .pending, #results .spinner')"
-
-
-def _open_compare(page: Page, base: str, banner: bool) -> None:
-    page.theme(False)
-    page.goto(base + "/", f"!!{page.el('use', provider='xai')}", show_banner=banner)
-    page.js("window.scrollTo(0, 0)")
-
-
-def _estimate(page: Page) -> None:
+def estimate(page: Page) -> None:
     page.click("estimate_btn")
     page.wait(page.visible("estimate"))
     page.wait(page.enabled("run_btn"))
 
 
+def answers_done(page: Page, n: int) -> str:
+    """JS: the jury turn shows ``n`` answer bodies and nothing is pending."""
+    return f"{page.count('answer_body')} >= {n} && {page.count('pending')} === 0"
+
+
+def synthesis_ready(page: Page) -> None:
+    """Bring the synthesis panel into view (it estimates lazily) and wait for its button."""
+    page.wait(f"!!{page.el('synthesis')}", timeout_s=30)
+    page.scroll_set(page.target_y("synthesis", offset=8))
+    page.wait(page.enabled("syn_btn"), timeout_s=30)
+
+
+def run_synthesis(page: Page, rec: Recorder | None) -> None:
+    """Click AI synthesize; continue past the optional skip-review decision; wait."""
+    page.click("syn_btn")
+    done = f"window.__cap.visible({page.el('syn_result')})"
+    decision = f"window.__cap.visible({page.el('decision')})"
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if rec is not None:
+            rec.shot(160)
+        else:
+            time.sleep(0.15)
+        if page.js(done):
+            return
+        if page.js(decision):
+            if rec is not None:
+                rec.hold(900)
+            page.click("review_btn")
+    raise TimeoutError(f"timed out waiting for {done}")
+
+
+def ask_the_jury(page: Page, rec: Recorder | None) -> None:
+    """Type the demo question, pick four models, estimate, ask, and wait for the answers."""
+    from llm_crossjury.demo import DEMO_QUESTION  # noqa: PLC0415
+
+    if rec is None:
+        page.set_text("task", DEMO_QUESTION)
+    else:
+        rec.type_text("task", DEMO_QUESTION, chars_per_frame=7)
+        rec.hold(400)
+    select_models(page, rec)
+    estimate(page)
+    if rec is not None:
+        page.scroll_set(page.bottom_y())
+        rec.shot(1600)
+    page.click("run_btn")
+    if rec is None:
+        page.wait(answers_done(page, len(PROVIDERS)), timeout_s=60)
+    else:
+        rec.wait_recording(answers_done(page, len(PROVIDERS)), frame_ms=180, timeout_s=60)
+
+
+def continue_chat(page: Page, rec: Recorder | None) -> None:
+    """Click "Continue with" on one answer, send the demo follow-up, wait for the reply."""
+    from llm_crossjury.demo.script import CHAT_QUESTION  # noqa: PLC0415
+
+    page.click("continue_btn", index=CONTINUE_INDEX)
+    page.wait(f"window.__cap.visible({page.el('send_btn')})")
+    if rec is None:
+        page.set_text("task", CHAT_QUESTION)
+    else:
+        rec.shot(700)
+        rec.type_text("task", CHAT_QUESTION, chars_per_frame=6)
+        rec.hold(500)
+    page.wait(page.enabled("send_btn"))
+    page.click("send_btn")
+    busy = "document.querySelector('.turn-chat [aria-busy=\"true\"]')"
+    reply = f"{page.count('chat_reply')} > 0 && !{busy}"
+    if rec is None:
+        page.wait(reply, timeout_s=30)
+    else:
+        rec.wait_recording(reply, frame_ms=180, timeout_s=30)
+    time.sleep(0.3)
+    page.scroll_set(page.bottom_y())
+
+
 def record_flow(page: Page, base: str, rec: Recorder, banner: bool) -> None:
-    """The hero flow, recorded frame by frame."""
-    from llm_crossjury.demo import DEMO_QUESTION  # noqa: PLC0415
-
-    _open_compare(page, base, banner)
+    """The hero: one full loop, recorded frame by frame."""
+    open_home(page, base, banner)
     rec.shot(900)
-    rec.type_text("task", DEMO_QUESTION)
-    rec.hold(500)
-    select_models(page, rec, PROVIDERS)
-    rec.hold(300)
-    _estimate(page)
-    rec.shot(300)
-    rec.scroll_to(page.target_y("actions", offset=300))
-    rec.hold(1500)
-    page.click("run_btn")
-    rec.scroll_to(page.target_y("results", offset=8), steps=6)
-    rec.wait_recording(f"window.__cap.visible({page.el('results')}) && {RESULTS_DONE}")
-    rec.hold(1800)
-    page.wait(page.visible("synthesis"))
-    rec.scroll_to(page.target_y("results", offset=-260), steps=8)
-    rec.hold(900)
-    rec.scroll_to(page.target_y("synthesis", offset=8))
-    page.wait(page.enabled("syn_btn"))
-    rec.shot(1000)
-    page.click("syn_btn")
-    rec.wait_recording(f"window.__cap.visible({page.el('syn_result')})", frame_ms=160)
-    rec.hold(400)
-    rec.scroll_to(page.target_y("syn_result", offset=8))
+    ask_the_jury(page, rec)
+    rec.scroll_to(page.target_y("jury_card", offset=8), steps=6)
     rec.hold(2600)
+    synthesis_ready(page)
+    rec.shot(900)
+    run_synthesis(page, rec)
+    rec.scroll_to(page.target_y("final", offset=8), steps=8)
+    rec.hold(2800)
     start, end = page.scroll_y(), page.target_y("additional", offset=8)
-    rec.scroll_to(end, steps=max(6, int((end - start) / 70)), step_ms=70)
-    rec.hold(3200)
-    bottom = float(page.js("document.documentElement.scrollHeight - window.innerHeight"))
-    rec.scroll_to(bottom, steps=10, step_ms=70)
-    rec.hold(2600)
+    rec.scroll_to(end, steps=max(6, int((end - start) / 80)), step_ms=70)
+    rec.hold(3400)
+    rec.scroll_to(page.target_y("jury_card", offset=8), steps=8)
+    rec.hold(600)
+    continue_chat(page, rec)
+    rec.scroll_to(page.bottom_y(), steps=6)
+    rec.hold(3600)
 
 
-def stills_flow(page: Page, base: str, shots: Shots, banner: bool) -> None:
-    """The same flow without recording: estimate, compare and synthesis stills."""
+def conversation_stills(page: Page, base: str, shots: Shots, banner: bool) -> None:
+    """Answers, synthesis, additional list and the chat view, from one conversation."""
+    open_home(page, base, banner)
+    ask_the_jury(page, None)
+    shots.capture("answers", "jury_turn", max_height=820)
+    synthesis_ready(page)
+    run_synthesis(page, None)
+    shots.capture("synthesis", "final", max_height=900)
+    shots.capture("additional-list", "additional", max_height=760)
+    continue_chat(page, None)
+    page.resize(page.width, 860)
+    time.sleep(0.3)
+    page.scroll_set(page.bottom_y())
+    shots.capture_viewport("conversation")
+    page.resize(page.width, STILL_HEIGHT)
+
+
+def models_still(page: Page, base: str, shots: Shots, banner: bool) -> None:
+    """The jury panel: two models on a subscription, the cost estimate and the consent."""
+    if not shots.wanted("models"):
+        return
     from llm_crossjury.demo import DEMO_QUESTION  # noqa: PLC0415
 
-    _open_compare(page, base, banner)
+    open_home(page, base, banner)
     page.set_text("task", DEMO_QUESTION)
-    select_models(page, None, PROVIDERS)
-    _estimate(page)
-    shots.capture("estimate", "actions")
-    page.click("run_btn")
-    page.wait(RESULTS_DONE)
-    page.wait(page.visible("synthesis"))
-    shots.capture("compare", "results", max_height=760)
-    page.wait(page.enabled("syn_btn"))
-    page.click("syn_btn")
-    page.wait(f"window.__cap.visible({page.el('syn_result')})", timeout_s=40)
-    shots.capture("synthesis", "syn_result", max_height=900)
-    shots.capture("additional-list", "additional")
-
-
-def subscription_flow(page: Page, base: str, shots: Shots, banner: bool) -> None:
-    page.theme(False)
-    page.goto(base + "/", f"!!{page.el('use', provider='xai')}", show_banner=banner)
     for provider in ("anthropic", "openai"):
         page.click("backend", provider=provider, backend="cli")
     page.wait(
@@ -735,36 +914,52 @@ def subscription_flow(page: Page, base: str, shots: Shots, banner: bool) -> None
     )
     select_models(page, None, ("anthropic", "openai", "gemini"))
     page.js("document.querySelectorAll('#providers details[open]').forEach((d) => d.open = false)")
-    shots.capture("subscription", "providers")
+    page.wait(page.visible("consent"))
+    if not page.js(f"{page.el('consent')}.checked"):
+        page.click("consent")  # subscription members need the unknown-cost consent
+    estimate(page)
+    shots.capture("models", "jury_panel", scroll=False)
 
 
-def attachments_flow(
+def attachments_still(
     page: Page, base: str, shots: Shots, banner: bool, samples: list[Path]
 ) -> None:
+    """The composer with a PDF, a Word file and a PNG attached."""
+    if not shots.wanted("attachments"):
+        return
     from llm_crossjury.demo import DEMO_QUESTION  # noqa: PLC0415
 
-    page.theme(False)
-    page.goto(base + "/", f"!!{page.el('use', provider='xai')}", show_banner=banner)
+    page.resize(page.width, 860)
+    open_home(page, base, banner)
     page.set_text("task", DEMO_QUESTION)
-    select_models(page, None, PROVIDERS)
+    select_models(page, None)
     page.set_files("attach_input", samples)
     page.wait(
         f"document.querySelectorAll({json.dumps(SEL['attach_list'] + ' li')}).length >= "
         f"{len(samples)} && !document.querySelector('#attach-list .spinner')"
     )
-    shots.capture("attachments", "task_panel")
+    time.sleep(0.3)
+    shots.capture("attachments", "composer", scroll=False)
+    page.resize(page.width, STILL_HEIGHT)
 
 
-def settings_flow(page: Page, base: str, shots: Shots, banner: bool) -> None:
+def wizard_still(page: Page, base: str, shots: Shots, banner: bool) -> None:
+    """The setup wizard's Subscriptions step, with one row's commands open."""
+    if not shots.wanted("wizard"):
+        return
     page.theme(False)
     page.goto(
-        base + "/settings",
-        "document.querySelectorAll('input, button').length > 2",
+        base + "/settings?onboarding=1",
+        f"window.__cap.visible({page.el('wizard')})",
         show_banner=banner,
     )
-    time.sleep(0.4)
-    page.js(MASK_PATHS)
-    shots.capture_viewport("settings")
+    page.click("wizard_next")
+    page.wait(f"document.querySelectorAll({json.dumps(SEL['cli_rows'] + ' > *')}).length > 0")
+    time.sleep(1.0)  # the CLI check settles
+    first_row = json.dumps(SEL["cli_rows"] + " details")
+    page.js(f"document.querySelector({first_row})?.setAttribute('open', '')")
+    page.scroll_set(0)
+    shots.capture("wizard", "wizard", scroll=False)
 
 
 # --------------------------------------------------------------------------- main
@@ -775,39 +970,41 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--browser", help="Edge or Chrome executable (default: auto-detect).")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Output directory.")
-    parser.add_argument("--width", type=int, default=1200, help="Viewport width (px).")
-    parser.add_argument("--height", type=int, default=760, help="Viewport height (px).")
+    parser.add_argument("--width", type=int, default=1440, help="Viewport width (px).")
+    parser.add_argument("--height", type=int, default=860, help="Viewport height (px).")
     parser.add_argument(
-        "--gif-width", type=int, default=None, help="Width of hero.gif (default: viewport)."
+        "--gif-width", type=int, default=1080, help="Width of hero.gif (default: 1080)."
     )
-    parser.add_argument("--colors", type=int, default=256, help="GIF palette size.")
+    parser.add_argument("--colors", type=int, default=192, help="GIF palette size.")
     parser.add_argument("--no-gif", action="store_true", help="Skip hero.gif and hero.mp4.")
     parser.add_argument("--no-stills", action="store_true", help="Skip the screenshots.")
-    parser.add_argument("--show-banner", action="store_true", help="Keep the demo banner.")
+    parser.add_argument(
+        "--only", action="append", choices=STILLS, help="Only these stills (repeatable)."
+    )
+    parser.add_argument("--show-banner", action="store_true", help="Keep the demo labels.")
     args = parser.parse_args(argv)
 
     out: Path = args.out
     out.mkdir(parents=True, exist_ok=True)
     browser = find_browser(args.browser)
+    banner: bool = args.show_banner
     with tempfile.TemporaryDirectory(prefix="crossjury-samples-") as tmp, demo_server() as base:
         samples = make_samples(Path(tmp))
+        seed_history(base)
         with (
             headless_browser(browser, args.width, args.height) as ws_url,
             connect(ws_url, max_size=None, open_timeout=20) as ws,
         ):
             page = Page(ws, args.width, args.height)
             page.setup()
-            shots = Shots(page, out)
+            page.theme(False)
             if not args.no_gif:
                 rec = Recorder(page)
                 # Stills are taken in a second pass: a beyond-viewport capture during the
                 # recording can leave one glitched frame.
-                record_flow(page, base, rec, args.show_banner)
+                record_flow(page, base, rec, banner)
                 size = save_gif(
-                    rec.frames,
-                    out / "hero.gif",
-                    width=args.gif_width or args.width,
-                    colors=args.colors,
+                    rec.frames, out / "hero.gif", width=args.gif_width, colors=args.colors
                 )
                 seconds = sum(d for _, d in rec.frames) / 1000
                 print(f"hero.gif: {len(rec.frames)} frames, {seconds:.1f} s, {size / 1e6:.2f} MB")
@@ -816,10 +1013,16 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     print("ffmpeg not found: hero.mp4 skipped")
             if not args.no_stills:
-                stills_flow(page, base, shots, args.show_banner)
-                subscription_flow(page, base, shots, args.show_banner)
-                attachments_flow(page, base, shots, args.show_banner, samples)
-                settings_flow(page, base, shots, args.show_banner)
+                shots = Shots(page, out, frozenset(args.only) if args.only else None)
+                page.resize(args.width, STILL_HEIGHT)
+                if any(
+                    shots.wanted(n)
+                    for n in ("answers", "synthesis", "additional-list", "conversation")
+                ):
+                    conversation_stills(page, base, shots, banner)
+                models_still(page, base, shots, banner)
+                attachments_still(page, base, shots, banner, samples)
+                wizard_still(page, base, shots, banner)
                 for path in shots.written:
                     print(f"{path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}")
     return 0

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="72" viewBox="0 0 400 72" role="img" aria-labelledby="t">
+  <title id="t">llm-crossjury</title>
+  <rect x="4" y="4" width="64" height="64" rx="13" fill="#F5B800"/>
+  <path d="M20 17v16M30.67 17v16M41.33 17v16M52 17v16M20 33l16 13 16-13M36 46v10" fill="none" stroke="#1E2226" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="86" y="49" fill="#1E2226" font-family="Bahnschrift, 'DIN Alternate', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="36" font-weight="600" letter-spacing="-0.3">llm-crossjury</text>
+</svg>

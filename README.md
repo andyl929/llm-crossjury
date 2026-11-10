@@ -1,74 +1,94 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="llm-crossjury" width="420">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img src="docs/assets/logo-light.svg" alt="llm-crossjury" width="400">
+  </picture>
 </p>
 
 <p align="center">
-  Ask several AI models the same question, compare their answers side by side, and get
-  one final answer with the disagreements laid out.
+  <strong>Ask several AI models the same question, see their answers side by side, and
+  get one final answer that lists what they still disagree on.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/andyl929/llm-crossjury/actions/workflows/ci.yml"><img src="https://github.com/andyl929/llm-crossjury/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg" alt="Python 3.11 and 3.12">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Windows, macOS and Linux">
+  <img src="https://img.shields.io/badge/runs-locally-2E7D4F.svg" alt="Runs locally">
+  <!-- When the repository is public, add the CI badge:
+  <a href="https://github.com/andyl929/llm-crossjury/actions/workflows/ci.yml"><img src="https://github.com/andyl929/llm-crossjury/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  and, after the first PyPI release, a PyPI version badge. -->
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> &nbsp;·&nbsp;
+  <a href="#how-it-works">How it works</a> &nbsp;·&nbsp;
+  <a href="#api-keys-or-subscriptions">Keys or subscriptions</a> &nbsp;·&nbsp;
+  <a href="#privacy-and-cost">Privacy and cost</a> &nbsp;·&nbsp;
+  <a href="#faq">FAQ</a>
 </p>
 
 <p align="center">
   <img src="docs/assets/hero.gif" width="900"
-    alt="A question about reaction-time statistics is typed in. Four models are selected,
-    the cost is estimated, and four answers appear side by side. AI synthesize then
-    produces a final answer, followed by the additional list of disputed points, unique
-    insights and possibly wrong claims.">
+    alt="Demo of llm-crossjury. A statistics question is typed and four models are picked.
+    After a cost estimate, four answers appear side by side. AI synthesize writes one final
+    answer, followed by a list of disputed points, insights left out and claims reviewers
+    flagged as possibly wrong. Then the user continues the conversation with one of the
+    models and gets a reply.">
 </p>
 
-llm-crossjury is a local app for students, researchers and anyone who wants a second,
-third and fourth opinion. It sends your question (and any PDFs, Word files or
-screenshots) to models from Anthropic, OpenAI, Google and xAI, shows every answer, and
-can then have the models review each other anonymously before one of them writes the
-final answer. Where they still disagree, it tells you, and you decide.
+llm-crossjury is a local app for students, researchers and developers who want a second
+opinion on an AI answer, and a third and a fourth. It sends your question, and any PDFs,
+Word files or screenshots, to models from Anthropic, OpenAI, Google and xAI, and shows the
+answers next to each other. One click then has the models review each other anonymously
+and a chair model write one final answer, with the points still in dispute listed for you
+to decide. After that you keep talking with any model, and can hand the next question back
+to the whole jury.
 
-It runs on your machine, uses your own API keys or your existing Claude or ChatGPT
-subscription, and shows the cost before every run.
+It runs on your computer with your own API keys or the Claude, ChatGPT or SuperGrok
+subscription you already have, and it shows the cost before every run.
 
-## Why llm-crossjury
+## Why
 
-| The problem | What llm-crossjury does |
+- **One model can be confidently wrong.** With several independent answers you see what
+  they agree on, where they contradict each other, and which claims other models flag as
+  wrong, with the passage quoted.
+- **Comparing tabs by hand is slow.** One question goes to up to four models at once, the
+  answers line up in columns, and the comparison is written down instead of kept in your
+  head.
+- **Multi-model costs add up.** Every run is estimated before it starts, budgets stop runs
+  that would go over, and subscription calls are labelled as plan usage.
+
+## What you can do
+
+| Job | How |
 |---|---|
-| **One model can be confidently wrong.** A single answer gives you no way to tell a solid claim from a hallucination. | Several models answer independently. The agreement check shows what they all say, where they contradict each other, and what only one of them raised. Peer reviewers flag claims that look wrong, quoting the exact passage. |
-| **Comparing tabs by hand is slow.** Copying a question into four chat windows and reading the answers side by side takes time, and the comparison stays in your head. | One question, one click: answers appear in columns, and **AI synthesize** turns them into one answer plus a short list of what it left out and why. |
-| **You don't know what it will cost.** API pricing is per token, and multi-model runs multiply it. | Every run is estimated from the published prices before it starts. Built-in limits stop a run that could go over budget. Subscription runs are labelled as plan usage, since their cost per call is unknown. |
-
-## Features
+| **Check an answer against other models** | Pick up to four models and ask once. Each answers on its own; the answers appear side by side with cost, time and tokens. Run one model again without rerunning the others. |
+| **Get one answer you can trust more** | **AI synthesize** measures agreement, runs one round of anonymous peer review and has a chair model write the final answer. The additional list shows disputed points (marked "Decided by AI"), insights left out and possibly wrong claims. Overrule a decision and regenerate. |
+| **Keep working on it** | **Continue with** any model, or with the chair, as a normal chat. Ask the jury again at any point: every juror gets the conversation so far as context. |
+| **Work from your files** | Attach PDFs, Word files and images, or paste a screenshot. Models that read PDFs and images get the original; the others get the extracted text. Before you run, you see which vendors will receive the files. |
+| **Come back later** | Conversations are saved on your computer and listed in the sidebar. Close the tab mid-run and the result is there when you return. Export any conversation as Markdown. |
+| **Use what you already pay for** | Run Claude Code, Codex CLI or Grok Build (experimental) on your subscription instead of an API key. The setup wizard installs and signs in to each with one click. |
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
-### Compare answers side by side
-
-Pick the models, estimate the cost, run (Ctrl+Enter works too). Each answer shows its
-model, token counts, cost and time; copy one answer or export the whole run as
-Markdown.
+<strong>Answers side by side</strong>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/compare-dark.png">
-  <img src="docs/assets/compare-light.png" alt="Results view with answers from four models in columns, each with token counts, cost and latency.">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/answers-dark.png">
+  <img src="docs/assets/answers-light.png" alt="A jury question and four answers in columns, from Anthropic, OpenAI, Google Gemini and xAI, each with its model, cost, time and token counts.">
 </picture>
 
 </td>
 <td width="50%" valign="top">
 
-### AI synthesis with an additional list
-
-One click measures agreement, runs one round of anonymous peer review and has a chair
-model write the final answer. Below it, the additional list shows disputed points
-(marked "decided by AI"), unique insights the chair left out, and claims reviewers
-flagged as possibly wrong. Pick a different position or include an insight, then
-regenerate.
+<strong>The additional list</strong>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/additional-list-dark.png">
-  <img src="docs/assets/additional-list-light.png" alt="Additional list with two disputed questions and their positions, two unique insights not included, and two possibly wrong claims flagged by two reviewers each.">
+  <img src="docs/assets/additional-list-light.png" alt="Additional list with a disputed question marked Decided by AI and the positions to choose from, two unique insights not included, and two possibly wrong claims, each flagged by two reviewers with the quoted passage.">
 </picture>
 
 </td>
@@ -76,74 +96,36 @@ regenerate.
 <tr>
 <td valign="top">
 
-### Attach PDFs, Word files and screenshots
-
-Drop files on the task, pick them, or paste a screenshot. Models that read PDFs and
-images natively get the original file; the others get the extracted text. Before the
-run, the app lists every vendor that will receive the files.
+<strong>Continue with one model</strong>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/attachments-dark.png">
-  <img src="docs/assets/attachments-light.png" alt="Task panel with a PDF, a Word file and a PNG attached, and a note listing the vendors the files will be sent to.">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/conversation-dark.png">
+  <img src="docs/assets/conversation-light.png" alt="The conversation view: a history sidebar with four conversations, a follow-up question that continues from OpenAI's answer, the model's reply, and the composer with a model picker and the Ask the jury and Send buttons.">
 </picture>
 
 </td>
 <td valign="top">
 
-### Use your subscription
-
-Switch a model card from **API key** to **Subscription** to run it through the
-official CLI you already signed in to: Claude Code, Codex CLI or Grok Build
-(experimental). Gemini works with an API key only.
+<strong>Subscriptions and the cost estimate</strong>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/subscription-dark.png">
-  <img src="docs/assets/subscription-light.png" alt="Model cards: Anthropic and OpenAI switched to Subscription with the CLI found, Gemini on API key with a note that it needs one, xAI on API key.">
-</picture>
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### Cost control
-
-The estimate shows a low to high range per model, using the prices in
-[`config/models.yaml`](config/models.yaml). Built-in limits: $5.00 per run, $15.00 per
-day, and a confirmation above $1.00; change them in Settings. A model without a
-verified price is refused.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/estimate-dark.png">
-  <img src="docs/assets/estimate-light.png" alt="Cost estimate of USD 0.028 to USD 0.2162 with one line per model and the budget limits.">
-</picture>
-
-</td>
-<td valign="top">
-
-### Private by design
-
-Keys and files stay on your computer. Each vendor receives only the prompts sent to
-its own models. No account, no telemetry. Add or test keys on the Settings page; a
-saved key is never shown again.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/settings-dark.png">
-  <img src="docs/assets/settings-light.png" alt="Settings page listing the four vendors, whether each key is set, where to get one, and buttons to add or test a key.">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/models-dark.png">
+  <img src="docs/assets/models-light.png" alt="The jury panel: Anthropic and OpenAI switched to Subscription, Gemini on an API key, and a cost estimate that shows dollars for the API model and plan usage for the two subscription calls.">
 </picture>
 
 </td>
 </tr>
 </table>
 
-The screenshots and the animation come from demo mode (`llm-crossjury ui --demo`), so
-the models, token counts and costs in them are simulated. They are regenerated with
+More: [the final answer](docs/assets/synthesis-light.png) and
+[attachments in the composer](docs/assets/attachments-light.png). All screenshots and the
+animation come from demo mode, so the models, answers, costs and budget limits in them are
+simulated. They are regenerated with
 [`scripts/capture_readme_media.py`](scripts/capture_readme_media.py).
 
 ## Quick start
 
-You need [uv](https://docs.astral.sh/uv/) and Git. uv installs a suitable Python for
-you.
+You need [uv](https://docs.astral.sh/uv/) and Git. uv installs a suitable Python for you.
 
 ```bash
 git clone https://github.com/andyl929/llm-crossjury.git
@@ -152,130 +134,172 @@ uv sync
 uv run llm-crossjury ui
 ```
 
-The UI opens at <http://127.0.0.1:8765/>. Use `--port` to pick another port and
-`--no-browser` to skip opening a browser tab.
+The app opens at <http://127.0.0.1:8765/>. On first start, a short setup wizard asks
+whether you have subscriptions, API keys or both, walks you through connecting them, and
+offers an example question to start with. Reopen it any time from **Settings** (*Open
+setup wizard*); the **?** button on the home page replays a four-step tour.
 
-On first start, when no model is usable yet, a short setup opens: choose your
-subscriptions, API keys or both, follow the steps, and start with an example
-question. For subscriptions, **Install** and **Sign in** run the vendor's official
-commands for you, only when you click (the commands are also shown to copy). Reopen
-the setup any time from **Settings** (*Open setup wizard*). The **?** button on the
-home page replays a four-step tour.
+**Try it without keys first:** `uv run llm-crossjury ui --demo` starts the same app with
+simulated models and canned answers. It makes no network calls, costs nothing, and keeps
+its state in a temporary folder.
 
-**Try it without keys:** `uv run llm-crossjury ui --demo` starts the same UI with
-simulated models and canned answers. It makes no network calls, costs nothing, and
-keeps all its state in a temporary folder.
+<details>
+<summary>Options and other ways to add keys</summary>
 
-### Add API keys
+- `--port 9000` picks another port; `--no-browser` skips opening a browser tab.
+- Keys saved in **Settings** go to a file in your user config folder that only your
+  account can read. **Test connection** checks a key.
+- You can also set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or
+  `XAI_API_KEY` as environment variables, in a `.env` file in the project folder, or as
+  one-line key files (`.anthropic.key`, `.openai.key`, `.gemini.key`, `.xai.key`).
 
-Open **Settings** in the top bar, paste a key and click **Test connection**. Each card
-links to the vendor's key page. Keys saved there go to a file in your user config
-folder that only your account can read.
+</details>
 
-You can also provide keys as environment variables, in a `.env` file in the project
-folder, or as one-line key files (`.anthropic.key`, `.openai.key`, `.gemini.key`,
-`.xai.key`). The variables are `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`GEMINI_API_KEY` and `XAI_API_KEY`.
-
-### Use a subscription instead
-
-1. Click **Install** and **Sign in** under *Settings, Subscriptions* (or in the setup
-   wizard), or install the vendor's official CLI and sign in yourself, once, in a
-   terminal:
-   - **Claude Code:** `curl -fsSL https://claude.ai/install.sh | bash` (macOS, Linux,
-     WSL), `irm https://claude.ai/install.ps1 | iex` (Windows PowerShell) or
-     `winget install Anthropic.ClaudeCode`. Then run `claude` and sign in with your
-     Claude account.
-   - **Codex CLI:** `npm install -g @openai/codex`, then `codex login` and choose
-     *Sign in with ChatGPT*.
-   - **Grok Build (experimental):** `curl -fsSL https://x.ai/cli/install.sh | bash` or
-     `irm https://x.ai/cli/install.ps1 | iex`, then run `grok` and sign in.
-2. In the UI, switch the model card to **Subscription**. If the CLI is not found yet,
-   open *Install and sign in* and click **Re-check** (the setup wizard shows the same
-   commands for your system and a **Check again** button).
-3. Tick the consent box before running. Subscription calls count against your plan's
-   usage limits, and their cost per call is unknown.
-
-llm-crossjury runs the CLI with tools, file access and command execution turned off,
-in an empty temporary folder, and never reads the CLI's login files. Install and sign-in
-run only on your click, from a fixed list of the vendors' official commands. See
-[ADR 0002](docs/adr/0002-cli-backend-security-boundary.md).
-
-**Coming next:** a PyPI package (`uvx llm-crossjury ui`) and one-click desktop builds
-for Windows and macOS. See the [roadmap](docs/ROADMAP.md) (milestones M1 and M2).
+A PyPI package (`uvx llm-crossjury ui`) and desktop builds for Windows and macOS are next
+on the [roadmap](docs/ROADMAP.md).
 
 ## How it works
 
-```mermaid
-flowchart LR
-    Q[Your question<br>and files] --> A1[Model A answers]
-    Q --> A2[Model B answers]
-    Q --> A3[Model C answers]
-    A1 & A2 & A3 --> G[Agreement check<br>consensus, disputed, unique]
-    G --> R[Anonymous peer review<br>issues and rankings]
-    G -.->|skip review when<br>agreement is high| C
-    R --> C[Chair writes<br>the final answer]
-    C --> F[Final answer<br>plus additional list]
-    F -.->|your rulings| C
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-it-works-dark.svg">
+    <img src="docs/assets/how-it-works-light.svg" width="560"
+      alt="Diagram. Your question, with any files, goes to Claude, ChatGPT, Gemini and Grok, which answer on their own (step 1). AI synthesize (step 2) runs an agreement check, an anonymous peer review that can be skipped when 80 percent agree, and a chair model that writes one final answer with a list of disputed points, possibly wrong claims and insights it left out. In step 3 you keep talking with any model or the chair, and can ask the jury again with the conversation as context.">
+  </picture>
+</p>
 
-1. **Answer.** Each selected model answers on its own, without seeing the others.
-2. **Agreement.** The answers are split into paragraphs and list items, and one
-   inexpensive judge model groups them by meaning. The app then sorts the groups into
-   consensus (two or more answers, no contradiction), disputed and unique points, and
-   computes the agreement ratio. When at least 80% of the points are shared by every
-   answer, it offers to skip the review.
-3. **Review.** One round of peer review. Answers are labelled "Response A", "Response
-   B" and so on in shuffled order, and model and vendor names are removed from the text.
-   Each reviewer sees other answers only, quotes the passage behind every issue, rates
-   its severity, and ranks the answers. The app combines the rankings with a Borda
-   count.
-4. **Chair.** One model writes the final answer from the answers, the agreement
-   groups and the reviews. It records each dispute with its provisional decision, and
-   the insights it chose to leave out. You can overrule any decision and regenerate.
+1. **Answer.** Each model you pick answers on its own, without seeing the others.
+2. **Agreement.** An inexpensive judge model groups the answers' points by meaning into
+   consensus, disputed and unique points. When at least 80% of the points are shared by
+   every answer, the app offers to skip the review.
+3. **Review.** One round of anonymous peer review: answers are relabelled "Response A",
+   "Response B" and so on in shuffled order, with model names removed, and no model
+   reviews its own answer. Reviewers quote the passage behind every issue and rank the
+   answers.
+4. **Chair.** One model writes the final answer from the answers, the agreement groups and
+   the reviews, and records each dispute with its decision and each insight it left out.
+   You can overrule any of them and regenerate.
+5. **Continue.** Chat with any model. Older turns of a long conversation are folded into a
+   short summary, so a call sends a compact context instead of the whole transcript, and a
+   new jury question gives every juror the same short case file.
 
-**Why it is built this way.** Language models used as judges have documented biases:
-they can favor an answer because of its position and favor their own answers (Zheng
-et al., *Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena*, 2023), and they can
-recognize and prefer their own generations (Panickssery et al., *LLM Evaluators
-Recognize and Favor Their Own Generations*, 2024). llm-crossjury therefore hides who
-wrote what, shuffles the labels on every run, and never lets a model review its own
-answer. Reviewers rank answers and back each issue with a quote instead of giving 1 to
-10 scores, since comparative judgments have been found to match human judgment better
-than direct scores (Liu et al., *Aligning with Human Judgement: The Role of Pairwise
-Preference in Large Language Model Evaluators*, 2024). Review runs once, which keeps
-cost predictable; disagreements that remain go to you instead of another round.
+**Why anonymous review and rankings.** Models used as judges can favour an answer because
+of its position and favour their own writing (Zheng et al., 2023,
+[*Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena*](https://arxiv.org/abs/2306.05685);
+Panickssery et al., 2024,
+[*LLM Evaluators Recognize and Favor Their Own Generations*](https://arxiv.org/abs/2404.13076)).
+So labels are hidden and shuffled on every run, and no model reviews itself. Reviewers rank
+instead of scoring from 1 to 10, because pairwise preferences have been found to match
+human judgement better than direct scores (Liu et al., 2024,
+[*Aligning with Human Judgement: The Role of Pairwise Preference in Large Language Model Evaluators*](https://arxiv.org/abs/2403.16950)).
+Review runs once to keep cost predictable; what remains disputed goes to you. Details are
+in the [spec](docs/SPEC.md) and the [architecture notes](docs/ARCHITECTURE.md).
+
+## API keys or subscriptions
+
+Each model card has a switch between **API key** and **Subscription**, and you can mix
+them in one question.
+
+| Vendor | API key | Subscription, through the vendor's official CLI |
+|---|---|---|
+| Anthropic | Yes | Claude Code, with Claude Pro or Max (experimental) |
+| OpenAI | Yes (not yet tested against the live API) | Codex CLI, with ChatGPT Plus or Pro (experimental) |
+| Google Gemini | Yes | Not offered (see below) |
+| xAI | Yes (not yet tested against the live API) | Grok Build, with SuperGrok (experimental, terms not verified) |
+
+**How subscription mode works.** llm-crossjury starts the vendor's own, unmodified CLI,
+signed in with your account, and reads its output. The CLI runs with tools, file access
+and command execution turned off, in an empty temporary folder, and llm-crossjury never
+reads its login files or tokens. The wizard's **Install** and **Sign in** buttons run only
+the vendor's official commands, only when you click, after showing you the exact command.
+Subscription calls count against your plan's usage limits and have no known per-call
+price, so you tick a consent box before running them. The full rules are in
+[ADR 0002](docs/adr/0002-cli-backend-security-boundary.md).
+
+**Why there is no Gemini subscription mode.** Google stopped serving Google AI Pro, Ultra
+and free accounts through Gemini CLI on 2026-06-18
+([gemini-cli discussion 27274](https://github.com/google-gemini/gemini-cli/discussions/27274)),
+and its replacement states that wrapping it in third-party applications is not supported
+under consumer plans ([Antigravity FAQ](https://antigravity.google/docs/faq/)). Gemini
+therefore needs an API key from Google AI Studio.
+
+**Check your plan's terms.** Anthropic's terms allow an end user to sign in to the
+unmodified Claude Code binary with their own subscription
+([Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)),
+and OpenAI documents non-interactive use of Codex with the saved CLI login
+([Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)). We
+have not verified xAI's terms for Grok Build yet, so it stays experimental.
+
+<details>
+<summary>Install and sign in by hand (the same commands the wizard runs)</summary>
+
+- **Claude Code:** `curl -fsSL https://claude.ai/install.sh | bash` (macOS, Linux, WSL),
+  `irm https://claude.ai/install.ps1 | iex` (Windows PowerShell) or
+  `winget install Anthropic.ClaudeCode`. Then run `claude` and sign in with your Claude
+  account.
+- **Codex CLI:** `npm install -g @openai/codex`, then `codex login` and choose *Sign in
+  with ChatGPT*.
+- **Grok Build (experimental):** `curl -fsSL https://x.ai/cli/install.sh | bash` or
+  `irm https://x.ai/cli/install.ps1 | iex`, then run `grok` and sign in.
+
+Then press **Check again** in the wizard, or **Re-check** on the model card.
+
+</details>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/wizard-dark.png">
+    <img src="docs/assets/wizard-light.png" width="640" alt="The setup wizard's Subscriptions step: Claude Code, Codex CLI and Grok Build (marked Experimental), each with its status and the command to run in a terminal, and a Check again button.">
+  </picture>
+</p>
 
 ## Privacy and cost
 
-**What leaves your computer.** Your question and attachments go to the vendors whose
-models you select. During synthesis, the anonymized answers and reviews go to the
-judge, reviewer and chair models you chose, and the attachments to the chair only. API
-calls go straight to the vendor with your key. Subscription calls go through the
-vendor's own CLI with its own login. Nothing is sent to the llm-crossjury project or
-any third party, and there is no telemetry.
+**Local first.** The app runs on your computer, with no account and no telemetry. Your
+question and attachments go only to the vendors whose models you pick: API calls go
+straight to the vendor with your key, subscription calls through the vendor's own CLI.
+During synthesis, the anonymized answers and reviews go to the judge, reviewer and chair
+models you chose, and attachments to the chair only. Nothing is sent to the llm-crossjury
+project.
 
-**What stays on your computer.**
+**What is stored on your computer.**
 
-- **Keys** stay on your machine and go only to their own vendor. The app never prints
-  or logs them, and the UI only says whether a key is set.
-- **Attachments** are kept in your user data folder and deleted 24 hours after upload.
-  No vendor file storage is used: files travel inside the request.
-- **Spending records** (a local SQLite ledger) hold token counts, costs and durations,
-  never prompt or answer text.
+- **Conversations** (questions, answers, syntheses and chats) are saved in your user data
+  folder so you can come back to them. Delete one from the sidebar, delete all under
+  **Settings > History**, or turn saving off there.
+- **Keys** go only to their own vendor. A saved key is never shown again and never
+  written to logs.
+- **Attachments** are deleted 24 hours after upload, unless a saved conversation uses
+  them. No vendor file storage is used: files travel inside the request.
+- **The spending ledger** records token counts, costs and durations, not text.
 
-**Budget defaults.** $5.00 per run, $15.00 per calendar day, and a confirmation prompt
-for any run estimated above $1.00, all editable under Settings -> Budget. The budget
-line at the top of the UI shows today's spend. Prices come only from
-[`config/models.yaml`](config/models.yaml), where every
-entry links to the vendor's pricing page and records the date it was checked.
+**Cost control.** Before each run you see a low-to-high estimate per model, from the
+prices in [`config/models.yaml`](config/models.yaml); every entry there links to the
+vendor's pricing page and records when it was checked. Default limits are **$5 per run,
+$15 per day, and a confirmation above $1**, all editable under **Settings > Budget**.
+Answers are capped at 32,000 output tokens by default (change it per model under
+*Options*). A model without a verified price is refused.
+
+## How it compares
+
+| | Vendor chat apps (ChatGPT, Claude, Gemini) | Arena-style comparison sites | llm-crossjury |
+|---|---|---|---|
+| Models per question | One | Two, anonymous | Up to four, chosen by you |
+| Who judges | You | You vote; votes feed a public leaderboard | The models review each other anonymously; you rule on what stays disputed |
+| One combined answer | No | No | Yes, with disputed and possibly wrong points listed |
+| Follow-up | With that vendor's model | Within one comparison | With any model, and back to the jury |
+| Where your conversation is kept | The vendor's account history | The site; conversations may be published as research data | Your computer; prompts go only to the vendors you pick |
+| What you pay | One subscription per vendor | Free | Your API usage (estimated per run) or subscriptions you already have |
+
+Tools built around one model, such as coding agents, fit better when you want a model to
+act on your files or code. llm-crossjury is for checking and combining answers.
 
 ## Supported models
 
 From [`config/models.yaml`](config/models.yaml), checked against the vendors' pages on
-2026-11-08. The aliases in brackets (`fast`, `balanced`, `best`) pick the default
-model per card and the inexpensive judge and reviewer models. Regenerate this table
-with `uv run python scripts/readme_models_table.py`.
+2026-11-08. The aliases in brackets (`fast`, `balanced`, `best`) pick each card's default
+model and the inexpensive judge and reviewer models. Regenerate this table with
+`uv run python scripts/readme_models_table.py`.
 
 <!-- models-table:start -->
 | Vendor | With an API key | With a subscription |
@@ -286,56 +310,50 @@ with `uv run python scripts/readme_models_table.py`.
 | xAI | `grok-4.3` (fast, balanced), `grok-4.7` (best) | Grok Build (`grok`), experimental: `grok-4.7`, `grok-4.7-build-fast` |
 <!-- models-table:end -->
 
-Vendors change models and prices often. To use a model that is not listed, add an
-entry to `config/models.local.yaml` (it overrides the shipped file and is ignored by
-Git) with its official source link and the date you checked it.
+Vendors change models and prices often. To use a model that is not listed, add an entry
+to `config/models.local.yaml` (it overrides the shipped file and is ignored by Git) with
+its official source link and the date you checked it.
 
 ## FAQ
 
-**Why can't Gemini use my subscription?**
-Google stopped serving Google AI Pro, Ultra and free accounts through Gemini CLI on
-2026-06-18 ([gemini-cli discussion 27274](https://github.com/google-gemini/gemini-cli/discussions/27274)),
-and its replacement states that wrapping it in third-party applications is not
-supported under consumer plans ([Antigravity FAQ](https://antigravity.google/docs/faq/)).
-Gemini therefore needs an API key from Google AI Studio.
+**Does it remember my conversations?**
+Yes, on your computer only. They are listed in the sidebar; delete them one by one or all
+at once, or turn saving off, under **Settings > History**.
 
-**Is subscription mode allowed?**
-llm-crossjury only launches the vendor's own, unmodified CLI, signed in by you, and
-never touches its credentials. Anthropic's terms allow an end user to sign in to the
-unmodified Claude Code binary with their own subscription
-([Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)).
-OpenAI documents non-interactive use of Codex with the saved CLI login
-([Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)).
-We have not yet verified xAI's terms for Grok Build, so it stays labelled
-experimental. Check your own plan's terms; our reasoning is in
-[ADR 0002](docs/adr/0002-cli-backend-security-boundary.md).
+**Do I need an API key?**
+No. With a Claude, ChatGPT or SuperGrok subscription you can use subscription mode;
+Gemini needs an API key. With neither, demo mode shows how everything works.
 
-**How much does a run cost?**
-It depends on the models, the length of your question and answers, and any
-attachments. The estimate before each run shows the range, and the results show what
-each call actually cost. Answers are usually the smaller part; the synthesis reads
-every answer again, so it costs more. Choosing the *Economy* review tier uses each
-vendor's `fast` model for the reviews.
+**How much does a question cost?**
+It depends on the models, the length of the question and answers, and any attachments.
+The estimate before each run shows the range, and each answer shows what it actually cost.
+The synthesis reads every answer again, so it usually costs more than the answers; the
+*Economy* review tier uses each vendor's `fast` model for the reviews.
 
-**Does it remember my questions?**
-No. Answers live only in your browser tab. The ledger records costs, not text. Run
-history is on the roadmap.
+**Is the final answer always right?**
+No. It is one model's synthesis of several answers. The additional list is there so you
+can see where the models disagreed and which claims were flagged, and decide yourself.
 
-**Can I run it from the command line?**
-Only the UI works today (`llm-crossjury ui`). The `run`, `cost` and `models` commands
-are placeholders for now.
+**Which parts are experimental?**
+Subscription mode, because vendors can change their CLIs at any time; Grok Build in
+particular, because xAI's terms are not verified yet. The OpenAI and xAI API connections
+have not yet been tested against the live APIs.
+
+**Can I use it from the command line?**
+Not yet. Only the app works today (`llm-crossjury ui`); the `run`, `cost` and `models`
+commands are placeholders.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md). Next up: the PyPI package, local run history, a desktop app for Windows and macOS, a redesigned UI
-with streaming answers, and the command-line `run` command with the Council and
-Document Review modes described in the [spec](docs/SPEC.md).
+Next: the PyPI package, desktop builds for Windows and macOS, a small public evaluation of
+whether the disputed and possibly wrong flags catch real errors, streaming answers, and
+the command-line `run` command. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Contributing
 
-Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) first: it holds the
-working rules (no hard-coded model facts or prices, no credential handling, tests for
-every change). Design documents and decision records live in [docs/](docs/).
+Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) first: no hard-coded
+model facts or prices, no credential handling, and tests for every change. Design
+documents and decision records are in [docs/](docs/).
 
 ```bash
 uv sync
@@ -344,8 +362,8 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy
 ```
 
-This is a clean-room implementation: no code from other "LLM council" projects was
-viewed or used ([ADR 0005](docs/adr/0005-clean-room-and-license.md)).
+This is a clean-room implementation: no code from other "LLM council" projects was viewed
+or used ([ADR 0005](docs/adr/0005-clean-room-and-license.md)).
 
 ## License
 

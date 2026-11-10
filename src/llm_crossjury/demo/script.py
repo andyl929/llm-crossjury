@@ -476,11 +476,31 @@ independent and overstates your evidence.
 - For the sensitivity check: U, the exact p-value, and the rank-biserial correlation.
 """
 
+CHAT_QUESTION = "How skewed is too skewed for Welch's t-test on raw reaction times?"
+"""The follow-up the capture script sends after "Continue with ..."."""
+
+CHAT_REPLY = """\
+There is no fixed cut-off, but with 12 per group a few checks settle it:
+
+- **Compare the mean with the median.** If the mean sits well above the median in \
+either group (say by more than 10%), a few slow trials are pulling it.
+- **Run both analyses.** Run Welch's t-test on the raw and on the log-transformed \
+reaction times. If the conclusions agree, report the raw analysis and mention the check.
+- **Look at single participants.** One participant two or three times slower than the \
+rest matters more than the skewness statistic itself.
+
+If the two analyses disagree, report the log-scale result as the main one and say why \
+in your analysis plan.
+"""
+"""Canned reply to any chat message (demo mode only)."""
+
 CONSENSUS_TOPICS: tuple[str, ...] = ("skew", "effect", "equal_n", "median_iqr")
 """Topics the chair lists as consensus (when at least two present answers hold them)."""
 
 __all__ = [
     "ANSWERS",
+    "CHAT_QUESTION",
+    "CHAT_REPLY",
     "CONSENSUS_TOPICS",
     "DEMO_PROVIDERS",
     "DEMO_QUESTION",

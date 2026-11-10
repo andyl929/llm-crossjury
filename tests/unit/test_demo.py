@@ -112,6 +112,13 @@ def test_free_text_request_gets_the_canned_answer() -> None:
     assert "no canned answer" in responder.respond("other", _request("x", None))
 
 
+def test_chat_messages_get_the_canned_follow_up() -> None:
+    from llm_crossjury.core.chat_service import CHAT_STAGE  # noqa: PLC0415
+
+    reply = responder.respond("openai", _request("anything", None, stage=CHAT_STAGE))
+    assert reply == script.CHAT_REPLY
+
+
 def test_unknown_segments_become_their_own_groups() -> None:
     text = "Response A / s1: A sentence the script has never seen before."
     judgment = responder.agreement(text)
