@@ -170,7 +170,8 @@ def test_duplicate_and_bad_turn_ids(harness: Harness) -> None:
 
 def test_consent_required_leaves_the_session_unchanged() -> None:
     clis = {p: FakeCliProvider(p) for p in CLI_PROVIDERS}
-    h = Harness(make_deps(cli_providers=clis), background=CollectingBackground())
+    background = CollectingBackground()
+    h = Harness(make_deps(cli_providers=clis), background=background)
     sid = _session(h)
     before = h.store.get(sid)
     body = _body(model={"provider": "anthropic", "backend": "cli", "model": "anthropic-cli"})
@@ -183,6 +184,7 @@ def test_consent_required_leaves_the_session_unchanged() -> None:
         assert h.store.get(sid) == before
         body["allow_unknown_cost"] = True
         r = h.client.post(f"/api/chat?session={sid}&turn={new_id()}", json=body)
+    background.close()  # the memory update it collected is never run here
     assert r.status_code == 200
     assert r.json()["status"] == "done"
     assert r.json()["cost"] is None

@@ -273,6 +273,23 @@
       if (h > 0 && main.scrollHeight > h) main.scrollTop = Math.max(0, lastTop + delta);
       lastTop = main.scrollTop;
     }).observe(main);
+
+    // Stick to the bottom: when the reader is at the end of the thread and content
+    // below grows (a card gains its buttons, a reply arrives), follow it down. A
+    // reader who scrolled up keeps their place.
+    const content = main.querySelector(".thread-wrap");
+    if (!content) return;
+    const SLACK = 8;
+    const nearBottom = () => main.scrollHeight - main.clientHeight - main.scrollTop <= SLACK;
+    let atBottom = nearBottom();
+    let lastContentH = content.offsetHeight;
+    main.addEventListener("scroll", () => { atBottom = nearBottom(); }, { passive: true });
+    new ResizeObserver(() => {
+      const ch = content.offsetHeight;
+      const grew = ch > lastContentH;
+      lastContentH = ch;
+      if (grew && atBottom) main.scrollTop = main.scrollHeight;
+    }).observe(content);
   }
 
   initSidebar();

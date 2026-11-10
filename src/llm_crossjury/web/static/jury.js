@@ -12,7 +12,7 @@
 (function () {
   const CJ = window.CJ;
   const {
-    el, icon, iconButton, money, moneyRange, tokens, plural, planUsage, cliCalls, hasPriced, costText,
+    el, icon, iconButton, noteLine, money, moneyRange, tokens, plural, planUsage, cliCalls, hasPriced, costText,
     api, fillMessage, toast, copyText, renderMarkdown, providerLabel, deliveryList, fixFor, scrollBehavior,
   } = CJ;
   const state = CJ.state;
@@ -145,33 +145,207 @@
 
     function renderStep1() {
       if (turn.status === "pending") {
-        renderPending();
+        renderMembers(true);
       } else if (turn.status === "error" || !turn.step1) {
         renderStep1Error();
       } else {
-        renderResults(turn.step1);
+        renderMembers(false);
       }
     }
 
-    function renderPending() {
+    // ---------------------------------------------------------------- member cards
+    //
+    // One slot per member, in selection order. A slot is rebuilt only when its member
+    // result changes (a finished member while step 1 runs, or a retry), so cards that
+    // already show an answer keep their scroll position, text selection and layout.
+    // The retrying state of a card is toggled in place.
+
+    const slots = [];         // index -> { key, node, member }
+    const retryLocal = new Set();   // indices this page is re-running
+    const retrySince = new Map();   // index -> ISO time the re-run was first seen
+
+    function doneMember(index) {
+      const done = turn.members_done || {};
+      return done[index] || done[String(index)] || null;
+    }
+
+    function serverRetrying() {
+      return Array.isArray(turn.retrying) ? turn.retrying : [];
+    }
+
+    function isRetrying(index) {
+      return retryLocal.has(index) || serverRetrying().includes(index);
+    }
+
+    function anyRetrying() {
+      return retryLocal.size > 0 || serverRetrying().length > 0;
+    }
+
+    function canRetry() {
+      return CJ.sessions.available() && turn.status === "done" && !!turn.step1;
+    }
+
+    function clearSlots() {
+      slots.length = 0;
+      answers.replaceChildren();
+    }
+
+    function renderMembers(pending) {
       const sels = turn.selections || [];
-      answers.replaceChildren(...sels.map((s) =>
-        el("article", { class: "answer", "aria-busy": "true" }, [
-          answerHead(s.provider, s.model, s.backend, null, null),
-          el("div", { class: "answer-pending pending" }, [
-            el("div", { class: "pending-line" }, [el("span", { class: "spinner" }),
-              el("span", { class: "elapsed", "data-since": turn.created_at || new Date().toISOString(), text: "Waiting for the answer" })]),
-            el("div", { class: "skeleton" }), el("div", { class: "skeleton" }), el("div", { class: "skeleton" }), el("div", { class: "skeleton" }),
-          ]),
-        ])));
-      if (!sels.length) answers.append(el("p", { class: "status" }, [el("span", { class: "spinner" }), "The models are answering\u2026"]));
-      total.textContent = "";
-      tools.hidden = true;
+      const members = pending ? null : turn.step1.members;
+      const n = pending ? sels.length : members.length;
+      if (answers.dataset.mode !== "members") {
+        clearSlots();
+        answers.dataset.mode = "members";
+      }
       stepError.hidden = true;
+      const canChat = CJ.composer.chatAvailable();
+      const retry = canRetry();
+      for (let index = 0; index < n; index++) {
+        const m = pending ? doneMember(index) : members[index];
+        const key = JSON.stringify([m, canChat, m ? null : sels[index]]);
+        const slot = slots[index];
+        if (!slot || slot.key !== key) {
+          const node = m ? memberArticle(m, index, canChat) : pendingArticle(sels[index]);
+          const old = slot ? slot.node : null;
+          // Keep the reader's layout choices on a rebuilt card.
+          if (old && old.classList.contains("is-wide")) node.classList.add("is-wide");
+          if (old) answers.replaceChild(node, old);
+          else answers.append(node);
+          slots[index] = { key: key, node: node, member: m };
+        }
+        syncRetryButton(index, retry);
+        syncRetrying(index);
+      }
+      while (slots.length > n) slots.pop().node.remove();
+      const waiting = answers.querySelector(".answers-waiting");
+      if (waiting) waiting.remove();
+      if (pending && !n) {
+        answers.append(el("p", { class: "status answers-waiting" }, [el("span", { class: "spinner" }), "The models are answering\u2026"]));
+      }
+      if (pending) {
+        const got = slots.filter((s) => s.member).length;
+        total.textContent = n ? got + " of " + plural(n, "model") + " answered so far." : "";
+        tools.hidden = true;
+      } else {
+        renderTotal(turn.step1);
+        tools.hidden = false;
+      }
+      syncRetryButtons();
+    }
+
+    function pendingArticle(s) {
+      return el("article", { class: "answer", "aria-busy": "true" }, [
+        answerHead(s.provider, s.model, s.backend, null, null),
+        el("div", { class: "answer-pending pending" }, [
+          el("div", { class: "pending-line" }, [el("span", { class: "spinner" }),
+            el("span", { class: "elapsed", "data-since": turn.created_at || new Date().toISOString(), text: "Waiting for the answer" })]),
+          el("div", { class: "skeleton" }), el("div", { class: "skeleton" }), el("div", { class: "skeleton" }), el("div", { class: "skeleton" }),
+        ]),
+      ]);
+    }
+
+    function memberArticle(m, index, canChat) {
+      const label = providerLabel(m.provider);
+      const failed = m.error !== null;
+      const article = el("article", { class: "answer" + (failed ? " has-error" : ""), "data-provider": m.provider, "data-index": String(index) });
+      const body = failed
+        ? el("div", { class: "answer-error" }, [
+          el("div", { class: "answer-error-title" }, [icon("alert"), "No answer"]),
+          el("div", { text: m.error }),
+          fixFor(m.error),
+        ])
+        : el("div", { class: "answer-body", tabindex: "0", role: "region", "aria-label": label + " answer" },
+          renderMarkdown(m.text));
+      const delivery = deliveryList(m.attachments);
+      article.append(answerHead(m.provider, m.model, m.backend, memberMeta(m), answerTools(article, m, index)));
+      article.append(el("div", { class: "retry-status pending-line", hidden: true }));
+      if (delivery) article.append(delivery);
+      article.append(body);
+      if (!failed) wireSyncScroll(body);
+      const foot = [];
+      if (canChat && !failed) {
+        foot.push(el("button", {
+          type: "button", class: "btn btn-small btn-continue",
+          onclick: () => CJ.composer.continueFrom({
+            model: { provider: m.provider, backend: m.backend, model: m.model },
+            continued_from: { turn_id: tid, source: "member", member_index: index },
+            label: label + "'s answer",
+          }),
+        }, [icon("chat"), "Continue with " + label]));
+      }
+      article.append(el("div", { class: "answer-foot", hidden: !foot.length }, foot));
+      return article;
+    }
+
+    // The retry button of a finished card, added once step 1 is complete (in place,
+    // so the card is not rebuilt).
+    function syncRetryButton(index, retry) {
+      const slot = slots[index];
+      if (!slot || !slot.member) return;
+      const foot = slot.node.querySelector(".answer-foot");
+      const btn = foot.querySelector(".btn-retry");
+      if (!retry) {
+        if (btn) btn.remove();
+        foot.hidden = !foot.children.length;
+        return;
+      }
+      if (btn) return;
+      const failed = slot.member.error !== null;
+      const text = failed ? "Retry" : "Run again";
+      foot.append(el("button", {
+        type: "button", class: "btn btn-small btn-retry" + (failed ? "" : " btn-link"),
+        "data-index": String(index), "aria-label": text + ": " + providerLabel(slot.member.provider),
+        title: failed ? "Ask this model again" : "Ask this model again; the other answers stay",
+        onclick: () => onRetry(index),
+      }, [icon("refresh"), text]));
+      foot.hidden = false;
+    }
+
+    // The retrying state of one card, toggled in place (no rebuild).
+    function syncRetrying(index) {
+      const slot = slots[index];
+      if (!slot || !slot.member) return;
+      const on = isRetrying(index);
+      const node = slot.node;
+      const bar = node.querySelector(".retry-status");
+      if (on && !retrySince.has(index)) retrySince.set(index, new Date().toISOString());
+      if (!on) retrySince.delete(index);
+      if (node.classList.contains("is-retrying") === on) return;
+      node.classList.toggle("is-retrying", on);
+      if (on) node.setAttribute("aria-busy", "true");
+      else node.removeAttribute("aria-busy");
+      if (!bar) return;
+      bar.hidden = !on;
+      bar.replaceChildren();
+      if (on) {
+        bar.append(el("span", { class: "spinner" }), el("span", {
+          class: "elapsed", "data-since": retrySince.get(index), "data-prefix": "Running again", text: "Running again",
+        }));
+      }
+    }
+
+    function syncRetryButtons() {
+      const busy = syn.busy || syn.remote;
+      for (const btn of answers.querySelectorAll(".btn-retry")) {
+        const index = Number(btn.dataset.index);
+        btn.disabled = busy || isRetrying(index);
+      }
+    }
+
+    function renderTotal(result) {
+      const planCalls = result.members.filter((m) => m.backend === "cli" && m.error === null && m.cost === null).length;
+      const otherUnknown = result.unknown_cost_members - planCalls;
+      let text = "Total " + money(result.currency, result.total_cost);
+      if (planCalls) text += " + " + planUsage(planCalls);
+      if (otherUnknown > 0) text += " (+ " + otherUnknown + " with unknown cost)";
+      const ok = result.members.filter((m) => m.error === null).length;
+      total.textContent = plural(ok, "answer") + " of " + result.members.length + ". " + text + ".";
     }
 
     function renderStep1Error() {
-      answers.replaceChildren();
+      clearSlots();
+      answers.dataset.mode = "error";
       total.textContent = "";
       tools.hidden = true;
       const text = turn.error || "This question did not get answers.";
@@ -214,62 +388,93 @@
       return el("div", { class: "answer-tools" }, list);
     }
 
-    function renderResults(result) {
-      const canChat = CJ.composer.chatAvailable();
-      answers.replaceChildren(...result.members.map((m, index) => {
-        const article = el("article", { class: "answer" + (m.error !== null ? " has-error" : ""), "data-provider": m.provider });
-        const body = m.error !== null
-          ? el("div", { class: "answer-error" }, [
-            el("div", { class: "answer-error-title" }, [icon("alert"), "No answer"]),
-            el("div", { text: m.error }),
-            fixFor(m.error),
-          ])
-          : el("div", { class: "answer-body", tabindex: "0", role: "region", "aria-label": providerLabel(m.provider) + " answer" },
-            renderMarkdown(m.text));
-        const delivery = deliveryList(m.attachments);
-        article.append(answerHead(m.provider, m.model, m.backend, memberMeta(m), answerTools(article, m, index)));
-        if (delivery) article.append(delivery);
-        article.append(body);
-        if (canChat && m.error === null) {
-          article.append(el("div", { class: "answer-foot" }, el("button", {
-            type: "button", class: "btn btn-small btn-continue",
-            onclick: () => CJ.composer.continueFrom({
-              model: { provider: m.provider, backend: m.backend, model: m.model },
-              continued_from: { turn_id: tid, source: "member", member_index: index },
-              label: providerLabel(m.provider) + "'s answer",
-            }),
-          }, [icon("chat"), "Continue with " + providerLabel(m.provider)])));
+    // ---------------------------------------------------------------- member retry
+
+    function hasStep2Result() {
+      const s = turn.synthesis || {};
+      return ["agreement", "finish", "resynthesize"].some((k) => s[k]);
+    }
+
+    async function onRetry(index) {
+      if (!canRetry() || isRetrying(index) || syn.busy || syn.remote) return;
+      const m = turn.step1.members[index];
+      if (!m) return;
+      const label = providerLabel(m.provider);
+      const q = CJ.sessions.params(tid);
+      let est;
+      try {
+        est = await api("/api/run/member/estimate" + q, { index: index });
+      } catch (error) {
+        toast(label + ": " + error.message);
+        return;
+      }
+      const b = est.budget;
+      if (b.refused) {
+        toast("Refused by the budget: " + (b.refusal_reason || "over budget"));
+        return;
+      }
+      const files = (turn.attachment_ids || []).length;
+      const body = [
+        "Only " + label + " answers again, to the same question" + (files ? " with the same " + plural(files, "file") : "") +
+          ". The other answers stay as they are.",
+        "Estimated cost: " + estimateText(est.currency, est) + ".",
+      ];
+      if (b.needs_confirmation) {
+        body.push("This is above your confirmation threshold (" + money(b.currency, b.confirm_above) + ").");
+      }
+      if (est.cli_calls) body.push(state.consentText || "Subscription calls have unknown cost and count against your plan's usage limits.");
+      if (hasStep2Result()) body.push("The synthesis below will not include the new answer until you synthesize again.");
+      const ok = await CJ.askDialog({ title: (m.error !== null ? "Retry " : "Run ") + label + (m.error !== null ? "?" : " again?"), body: body, confirm: m.error !== null ? "Retry" : "Run again" });
+      if (!ok) return;
+      let req = { index: index, confirmed: !!b.needs_confirmation, allow_unknown_cost: est.cli_calls > 0 };
+      retryLocal.add(index);
+      refreshRetryState();
+      try {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await api("/api/run/member" + q, req);
+            if (res.turn) CJ.sessions.replaceTurn(res.turn, false);
+            if (m.backend === "cli") state.planCalls += 1;
+            break;
+          } catch (error) {
+            const conflict = error.status === 409 && (error.code === "consent_required" || error.code === "confirmation_required");
+            if (conflict && attempt === 0) {
+              const again = await CJ.composer.resolveConflict(error, req, "Run anyway?");
+              if (again) { req = again; continue; }
+              break;
+            }
+            toast(label + ": " + (error.code === "budget_refused" ? "Refused by the budget: " : "") + error.message);
+            break;
+          }
         }
-        return article;
-      }));
-      const planCalls = result.members.filter((m) => m.backend === "cli" && m.error === null && m.cost === null).length;
-      const otherUnknown = result.unknown_cost_members - planCalls;
-      let text = "Total " + money(result.currency, result.total_cost);
-      if (planCalls) text += " + " + planUsage(planCalls);
-      if (otherUnknown > 0) text += " (+ " + otherUnknown + " with unknown cost)";
-      const ok = result.members.filter((m) => m.error === null).length;
-      total.textContent = plural(ok, "answer") + " of " + result.members.length + ". " + text + ".";
-      tools.hidden = false;
-      stepError.hidden = true;
-      wireSyncScroll();
+      } finally {
+        retryLocal.delete(index);
+        refreshRetryState();
+        CJ.composer.refreshBudget();
+        CJ.sessions.refresh();
+      }
+    }
+
+    function refreshRetryState() {
+      for (let index = 0; index < slots.length; index++) syncRetrying(index);
+      syncRetryButtons();
+      if (ui) applyLock();
     }
 
     // Synchronized scrolling: scrolling one answer moves the others to the same
     // relative position. Off by default.
     let syncing = false;
-    function wireSyncScroll() {
-      for (const body of answers.querySelectorAll(".answer-body")) {
-        body.addEventListener("scroll", () => {
-          if (!syncScroll || syncing) return;
-          syncing = true;
-          const range = body.scrollHeight - body.clientHeight;
-          const ratio = range > 0 ? body.scrollTop / range : 0;
-          for (const other of answers.querySelectorAll(".answer-body")) {
-            if (other !== body) other.scrollTop = ratio * (other.scrollHeight - other.clientHeight);
-          }
-          requestAnimationFrame(() => { syncing = false; });
-        }, { passive: true });
-      }
+    function wireSyncScroll(body) {
+      body.addEventListener("scroll", () => {
+        if (!syncScroll || syncing) return;
+        syncing = true;
+        const range = body.scrollHeight - body.clientHeight;
+        const ratio = range > 0 ? body.scrollTop / range : 0;
+        for (const other of answers.querySelectorAll(".answer-body")) {
+          if (other !== body) other.scrollTop = ratio * (other.scrollHeight - other.clientHeight);
+        }
+        requestAnimationFrame(() => { syncing = false; });
+      }, { passive: true });
     }
 
     // ---------------------------------------------------------------- step 2 DOM
@@ -312,6 +517,9 @@
         el("div", { class: "actions" }, [r.btn, r.status]),
         r.breakdown,
       ]);
+      r.stale = noteLine("warn", "Answers changed since this synthesis. Synthesize again to include them.");
+      r.stale.classList.add("syn-stale");
+      r.stale.hidden = true;
       r.progress = el("ol", { class: "stepper", "aria-label": "Synthesis progress", hidden: true });
       r.message = el("div", { class: "message syn-message", role: "alert", hidden: true });
       r.decision = el("div", { class: "decision", hidden: true });
@@ -321,7 +529,7 @@
           el("h3", { id: ids.heading, class: "panel-title" }, [el("span", { class: "step", text: "Step 2" }), " Synthesis"]),
           el("p", { class: "help", text: "Measure agreement, let the models review each other anonymously, and have a chair model write one final answer." }),
         ]),
-        r.unavailable, r.form, r.progress, r.message, r.decision, r.result,
+        r.stale, r.unavailable, r.form, r.progress, r.message, r.decision, r.result,
       ]);
 
       r.btn.addEventListener("click", onSynthesize);
@@ -414,8 +622,9 @@
       };
     }
 
+    // Step 2 waits while a member answer is being run again.
     function locked() {
-      return syn.busy || syn.remote;
+      return syn.busy || syn.remote || anyRetrying();
     }
 
     function applyLock() {
@@ -429,6 +638,7 @@
       }
       updateSynButton();
       updateResynthButton();
+      syncRetryButtons();
     }
 
     function setSynBusy(busy) {
@@ -440,7 +650,12 @@
     // ---------------------------------------------------------------- step 2 state
 
     function setupSynthesis() {
-      if (syn.material) return;
+      // A retried member changes the answers: rebuild the material from step 1.
+      const membersKey = JSON.stringify(turn.step1.members);
+      if (syn.material && syn.membersKey === membersKey) return;
+      const rebuild = !!syn.material;
+      syn.material = null;
+      syn.membersKey = membersKey;
       const ids = turn.attachment_ids || [];
       const list = turn.step1.members
         .filter((m) => m.error === null && typeof m.text === "string" && m.text.trim() !== "")
@@ -463,6 +678,11 @@
         : "";
       ui.attachNote.hidden = !ids.length;
       buildChairOptions(list);
+      if (rebuild) {
+        if (syn.chair) selectChair(syn.chair, syn.chairBackend);
+        synKey = null;
+        scheduleSynEstimate(0);
+      }
     }
 
     function buildChairOptions(list) {
@@ -678,7 +898,7 @@
       delete synthesis[stage + "_error"];
       if (result !== null) synthesis[stage] = result;
       const settings = settingsObject(outcome);
-      turn = Object.assign({}, turn, { synthesis: synthesis, synthesis_settings: settings });
+      turn = Object.assign({}, turn, { synthesis: synthesis, synthesis_settings: settings, synthesis_stale: false });
       commit(false);
       postSettings(settings);
     }
@@ -723,6 +943,7 @@
       ui.result.hidden = true;
       ui.decision.hidden = true;
       setSynBusy(true);
+      ui.stale.hidden = true;  // the server clears synthesis_stale when a stage starts
       ui.btn.replaceChildren(el("span", { class: "spinner" }), "Synthesizing\u2026");
       renderProgress({ agreement: "active" });
       synStatus("Measuring agreement\u2026");
@@ -791,6 +1012,7 @@
       synMessage("");
       if (!syn.runSettings) syn.runSettings = synSettings();
       setSynBusy(true);
+      ui.stale.hidden = true;  // the server clears synthesis_stale when a stage starts
       try {
         await finish(skip);
       } catch (error) {
@@ -1136,6 +1358,7 @@
       synMessage("");
       const body = Object.assign(resynthBody(), { confirmed: confirmed });
       setSynBusy(true);
+      ui.stale.hidden = true;  // the server clears synthesis_stale when a stage starts
       const btn = ui.result.querySelector(".resynth-btn");
       if (btn) btn.replaceChildren(el("span", { class: "spinner" }), "Regenerating\u2026");
       try {
@@ -1253,6 +1476,7 @@
       }
       setupSynthesis();
       ui.section.hidden = false;
+      ui.stale.hidden = !turn.synthesis_stale;
       if (!syn.material || syn.busy) return;
       const key = synthesisKey(turn);
       if (key === synKey) return;
@@ -1265,12 +1489,13 @@
     function update(next) {
       turn = next;
       renderQuestion();
-      const key = JSON.stringify([turn.status, turn.step1, turn.error, turn.selections]);
+      const key = JSON.stringify([turn.status, turn.step1, turn.error, turn.selections, turn.members_done, turn.retrying]);
       if (key !== step1Key) {
         step1Key = key;
         renderStep1();
       }
       syncSynthesis();
+      if (ui) applyLock();
     }
 
     function exportLines(level) {

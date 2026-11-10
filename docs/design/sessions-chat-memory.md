@@ -72,7 +72,27 @@ budget) run before a turn is written: a 409 leaves the session unchanged.
 * `POST /api/synthesis/{agreement,finish,resynthesize}?session=S&turn=T`: while running,
   `turn.synthesis["pending"] = "<stage>"`; on success `turn.synthesis["<stage>"] =` the
   JSON result; on failure `turn.synthesis["<stage>_error"] = "<message>"`; `pending`
-  is removed in both cases.
+  is removed in both cases. Starting a stage clears `synthesis_stale`. A stage is
+  refused (409 `turn_busy`) while a member of the turn is being run again.
+
+### Progressive step 1 and per-member retry (CI-7)
+
+* While `run` is in flight, each member is stored in `turn.members_done[index]` as soon
+  as it finishes (index into `selections`). The page that started the run polls the
+  session every second and takes over only `members_done`; a reloaded page uses the
+  normal 2 s polling. `step1` is still written once, when every member is done.
+* `POST /api/run/member?session=S&turn=T` with `{"index", "allow_unknown_cost",
+  "confirmed"}` runs `selections[index]` again with the same task, case file and
+  attachments. Pre-checks as for `run` (consent, budget refusal, confirmation); then
+  `index` is added to `retrying`, the call runs detached, the new member replaces
+  `step1.members[index]` and `members_done[index]`, the step-1 totals are recomputed,
+  `index` leaves `retrying`, and `synthesis_stale` is set if step 2 has any result. A
+  failed call keeps the old member. Returns `{"index", "member", "turn"}`. Errors: 400
+  `invalid_member_index`, 404 for an unknown session or turn, 409 `turn_busy` (step 1
+  pending, the member already re-running, or a step-2 stage running), 409 `no_answers`
+  (step 1 failed as a whole).
+* `POST /api/run/member/estimate?session=S&turn=T` with `{"index"}` returns the usual
+  estimate response for that one call.
 
 ### Chat
 

@@ -122,9 +122,11 @@ def _continued_text(
         return f"{SYNTHESIS_HEADER}\n\n{text}" if text else None
     members = turn.step1.members if turn.step1 is not None else ()
     index = source.member_index
-    if index is None or not 0 <= index < len(members):
+    if index is None:
         return None
-    member = members[index]
+    member = members[index] if 0 <= index < len(members) else turn.members_done.get(index)
+    if member is None:
+        return None
     if member.text is None or not member.text.strip():
         return None
     if target is not None and (member.provider, member.model) == (
