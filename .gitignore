@@ -40,3 +40,6 @@ config/models.local.yaml
 
 # Local API key files (one key per file), e.g. .anthropic.key - never commit
 *.key
+
+# Local backups
+*.bak

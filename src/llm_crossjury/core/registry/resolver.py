@@ -103,8 +103,9 @@ def resolve_models_path(base_dir: Path) -> Path:
 
     Precedence: the ``LLM_CROSSJURY_MODELS`` environment variable (if set and
     non-empty), then ``base_dir/config/models.local.yaml`` if it exists (git-ignored,
-    holds the user's real, verified entries), then ``base_dir/config/models.yaml``
-    (committed, fictitious examples only).
+    a full replacement for local experiments; it hides models added to the shipped
+    file later), then ``base_dir/config/models.yaml`` (committed, verified entries,
+    ADR 0006 as amended by D-7).
 
     Args:
         base_dir: Directory that contains ``config/`` (usually the project root).

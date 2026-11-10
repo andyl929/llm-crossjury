@@ -304,7 +304,7 @@ model and the inexpensive judge and reviewer models. Regenerate this table with
 <!-- models-table:start -->
 | Vendor | With an API key | With a subscription |
 |---|---|---|
-| Anthropic | `claude-haiku-5-5` (fast), `claude-sonnet-5-5` (balanced), `claude-opus-5-5`, `claude-fable-5-1` (best) | Claude Code (`claude`): `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1` |
+| Anthropic | `claude-haiku-5-5` (fast), `claude-sonnet-5-5` (balanced), `claude-opus-5-5`, `claude-fable-5-2` (best), `claude-fable-5-1` | Claude Code (`claude`): `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-2`, `claude-fable-5-1` |
 | OpenAI | `gpt-6-luna` (fast), `gpt-6.1-sol` (balanced), `gpt-6-astra` (best) | Codex CLI (`codex`): `gpt-6-luna`, `gpt-6.1-sol`, `gpt-6-astra` |
 | Google Gemini | `gemini-3.5-flash-lite` (fast), `gemini-3.8-flash` (balanced), `gemini-4-argon` (best) | not offered (API key only) |
 | xAI | `grok-4.3` (fast, balanced), `grok-4.7` (best) | Grok Build (`grok`), experimental: `grok-4.7`, `grok-4.7-build-fast` |
@@ -343,27 +343,11 @@ have not yet been tested against the live APIs.
 Not yet. Only the app works today (`llm-crossjury ui`); the `run`, `cost` and `models`
 commands are placeholders.
 
-## Roadmap
+## Roadmap and contributing
 
-Next: the PyPI package, desktop builds for Windows and macOS, a small public evaluation of
-whether the disputed and possibly wrong flags catch real errors, streaming answers, and
-the command-line `run` command. See [docs/ROADMAP.md](docs/ROADMAP.md).
-
-## Contributing
-
-Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) first: no hard-coded
-model facts or prices, no credential handling, and tests for every change. Design
-documents and decision records are in [docs/](docs/).
-
-```bash
-uv sync
-uv run pytest
-uv run ruff check . && uv run ruff format --check .
-uv run mypy
-```
-
-This is a clean-room implementation: no code from other "LLM council" projects was viewed
-or used ([ADR 0005](docs/adr/0005-clean-room-and-license.md)).
+Planned next: a PyPI package, desktop builds and streaming answers
+([full roadmap](docs/ROADMAP.md)). Issues and pull requests are welcome; see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

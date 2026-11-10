@@ -123,6 +123,45 @@ models:
       https://platform.claude.com/docs/en/build-with-claude/structured-outputs.
 
   - provider: anthropic
+    model_id: "claude-fable-5-2"
+    input_modalities: [image, pdf]   # image: models/fable-5-2/overview; pdf: live API test 2026-11-10 (docs page does not list PDF)
+    backends: [api, cli]
+    reasoning_control:
+      type: levels
+      parameter: "output_config.effort"
+      allowed: ["low", "medium", "high", "xhigh", "max"]
+      mapping: { low: "low", medium: "medium", high: "high" }
+    cli_flags:   # https://code.claude.com/docs/en/model-config (alias `fable` = Fable 5.2 from Claude Code v2.1.321)
+      model: ["--model", "{model}"]
+      reasoning: ["--effort", "{value}"]
+    context_window: 1000000
+    max_output: 128000
+    structured_output: true
+    pricing:
+      currency: USD
+      input_per_mtok: "8"
+      output_per_mtok: "40"
+      cached_input_per_mtok: "0.20"
+      cache_write_per_mtok: "10"
+      reasoning_per_mtok: null
+      batch_multiplier: "0.5"
+    reasoning_multipliers: null
+    source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+    last_verified: 2026-11-10
+    notes: >-
+      Released 2026-11-09; Anthropic's most capable generally available model. Adaptive
+      thinking always on (cannot be turned off); API default effort is high (Claude Code
+      default: medium). Full 1M context at standard pricing. Cache write = 5-minute cache
+      (1h write: 16). Cache read is 0.025x input. Thinking tokens billed as output. Batch
+      API 50% off. Fast mode (premium, $16/$80) not modelled. Omit temperature/top_p/top_k;
+      forced tool use returns 400 (structured output uses output_config.format instead).
+      Requires 30-day data retention (no ZDR by default). Structured output and PDF input
+      confirmed by a live API call on 2026-11-10. Also:
+      https://platform.claude.com/docs/en/about-claude/models/overview,
+      https://platform.claude.com/docs/en/models/fable-5-2/overview,
+      https://platform.claude.com/docs/en/build-with-claude/effort.
+
+  - provider: anthropic
     model_id: "claude-fable-5-1"
     input_modalities: [image, pdf]   # verified 2026-11-08: platform.claude.com/docs/en/build-with-claude/pdf-support and /vision (supportedModels)
     backends: [api, cli]
@@ -455,7 +494,7 @@ aliases:
   anthropic:
     fast: "claude-haiku-5-5"
     balanced: "claude-sonnet-5-5"
-    best: "claude-fable-5-1"
+    best: "claude-fable-5-2"
   gemini:
     fast: "gemini-3.5-flash-lite"
     balanced: "gemini-3.8-flash"
