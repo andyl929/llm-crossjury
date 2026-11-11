@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <meta name="color-scheme" content="light dark">
+  <title>llm-crossjury</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/resize.css">
+  <script src="/theme.js"></script>
+</head>
+<body class="app-home thread-empty mode-jury">
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <a class="skip-link" href="#task">Skip to the message box</a>
+
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-mark" viewBox="0 0 24 24"><path d="M4 3v7M9.33 3v7M14.67 3v7M20 3v7M4 10l8 6.5 8-6.5M12 16.5V21"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+    <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-system" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5v.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></symbol>
+    <symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 4v16M8 20h8M5 7h14M5 7l-3 6.5a3 3 0 0 0 6 0zM19 7l-3 6.5a3 3 0 0 0 6 0z"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h12l-2.5 4 2.5 4H5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 10A8 8 0 0 0 5.2 7.3L4 9M4 4.5V9h4.5M4.5 14a8 8 0 0 0 14.3 2.7L20 15M20 19.5V15h-4.5"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.9.7c0 1.7-2.5 2.2-2.5 3.9M12 17v.01"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2.5-6.5z"/><path d="M11.5 13.5L20 4"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <button id="sidebar-toggle" class="icon-btn sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="Hide conversations">
+      <svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg>
+    </button>
+    <a class="brand" href="/">
+      <svg class="icon brand-mark" aria-hidden="true"><use href="#i-mark"/></svg>
+      <span class="brand-name">llm-crossjury</span>
+    </a>
+    <nav class="topnav" aria-label="Main">
+      <a href="/" aria-current="page">Compare</a>
+      <a href="/settings">Settings</a>
+    </nav>
+    <span id="demo-badge" class="tag tag-info demo-badge" role="status" hidden>Demo mode: simulated answers, no API calls</span>
+    <div class="topbar-tools">
+      <button id="tour-btn" class="icon-btn tour-btn" type="button" aria-label="How it works" title="How it works" hidden>
+        <svg class="icon" aria-hidden="true"><use href="#i-help"/></svg>
+      </button>
+      <button id="theme-toggle" class="icon-btn theme-toggle" type="button" aria-label="Theme: system">
+        <svg class="icon" aria-hidden="true"><use href="#i-system"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside id="sidebar" class="sidebar" aria-labelledby="history-heading">
+      <div class="sidebar-head">
+        <button id="new-chat" type="button" class="btn btn-new">
+          <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New conversation
+        </button>
+      </div>
+      <h2 id="history-heading" class="sidebar-title">History</h2>
+      <ul id="history" class="history"></ul>
+      <p id="history-note" class="help history-note" hidden></p>
+    </aside>
+    <div id="sidebar-overlay" class="overlay" hidden></div>
+
+    <div id="workspace" class="workspace">
+      <main id="main" class="thread-scroll" tabindex="-1">
+        <h1 class="visually-hidden">Compare AI answers</h1>
+        <div class="thread-wrap">
+          <div id="thread-head" class="thread-head" hidden>
+            <h2 id="thread-title" class="thread-title"></h2>
+            <button id="export-btn" type="button" class="btn btn-small">
+              <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export Markdown
+            </button>
+          </div>
+
+          <div id="answers-empty" class="empty">
+            <ol class="empty-steps">
+              <li><strong>Ask.</strong> Write a question below and attach any files it needs.</li>
+              <li><strong>Compare.</strong> Pick up to four models. Each answers on its own, and the answers appear here side by side.</li>
+              <li><strong>Synthesize, then keep talking.</strong> A chair model writes one final answer with the points still in dispute. Continue with any model, or ask the jury again.</li>
+            </ol>
+            <p class="help">Every step shows its cost before it runs. Subscription models show plan usage instead of dollars.</p>
+          </div>
+
+          <div id="thread" class="thread"></div>
+
+          <section id="jury-panel" class="panel models-panel jury-panel" aria-labelledby="models-heading">
+            <div class="panel-head">
+              <h2 id="models-heading" class="panel-title"><span class="step">Jury</span> Models</h2>
+              <span id="models-count" class="panel-aside" aria-live="polite"></span>
+              <button id="jury-close" type="button" class="btn btn-small btn-link jury-close" hidden>
+                <svg class="icon" aria-hidden="true"><use href="#i-chat"/></svg>Chat with one model instead
+              </button>
+            </div>
+            <div id="providers" class="rack">
+              <p class="help rack-loading">Loading models&hellip;</p>
+            </div>
+            <div id="estimate" class="estimate" hidden></div>
+            <label id="consent-box" class="consent" hidden>
+              <input type="checkbox" id="consent">
+              <span id="consent-text">I understand: cost is unknown, calls count against my plan's usage limits, and this mode is experimental</span>
+            </label>
+          </section>
+        </div>
+      </main>
+
+      <div class="dock">
+        <div class="dock-inner">
+          <div id="message" class="message" role="alert" hidden></div>
+          <section id="composer" class="composer" aria-label="Message">
+            <div id="continue-chip" class="chip-row" hidden></div>
+            <label for="task" class="visually-hidden">Message</label>
+            <textarea id="task" rows="2" spellcheck="true" aria-describedby="action-hint"
+              placeholder="Ask a question or describe a task. Every selected model answers it on its own."></textarea>
+            <ul id="attach-list" class="attach-list" hidden></ul>
+            <p id="attach-privacy" class="note" hidden></p>
+            <div class="composer-bar">
+              <button id="attach-btn" type="button" class="icon-btn" aria-label="Attach files: PDF, Word or images, up to 20 MB. You can also drop or paste them." title="Attach files: PDF, Word or images, up to 20 MB. Drop or paste them too.">
+                <svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg>
+              </button>
+              <input id="attach-input" type="file" multiple hidden
+                accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif">
+              <div id="chat-controls" class="chat-controls" hidden>
+                <label for="chat-model" class="visually-hidden">Model for this message</label>
+                <select id="chat-model"></select>
+              </div>
+              <span class="composer-spacer"></span>
+              <button id="jury-btn" type="button" class="btn" hidden>
+                <svg class="icon" aria-hidden="true"><use href="#i-mark"/></svg>Ask the jury
+              </button>
+              <button id="send-btn" type="button" class="btn btn-primary btn-send" hidden disabled>
+                <svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Send
+              </button>
+              <button id="estimate-btn" type="button" class="btn">Estimate cost</button>
+              <button id="run-btn" type="button" class="btn btn-primary btn-run" disabled aria-keyshortcuts="Control+Enter Meta+Enter">Ask models</button>
+            </div>
+          </section>
+          <div class="composer-status">
+            <div id="context-meter" class="context-meter" hidden></div>
+            <dl class="readouts">
+              <div class="readout" id="strip-estimate">
+                <dt>Estimate</dt>
+                <dd><span class="readout-value">&ndash;</span><span class="readout-sub">Not estimated</span></dd>
+              </div>
+              <div class="readout readout-secondary" id="strip-last">
+                <dt>Last cost</dt>
+                <dd><span class="readout-value">&ndash;</span><span class="readout-sub">Nothing run yet</span></dd>
+              </div>
+              <div class="readout" id="strip-today">
+                <dt>Today</dt>
+                <dd><span class="gauge" aria-hidden="true"></span><span class="readout-value">&ndash;</span><span class="readout-sub"></span></dd>
+              </div>
+              <div class="readout readout-secondary" id="strip-plan" hidden>
+                <dt>Plan calls</dt>
+                <dd><span class="readout-value">0</span><span class="readout-sub">this session</span></dd>
+              </div>
+            </dl>
+            <span id="action-hint" class="strip-hint" aria-live="polite">Pick at least one model, then estimate the cost.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/app.js"></script>
+  <script src="/sessions.js"></script>
+  <script src="/jury.js"></script>
+  <script src="/chat.js"></script>
+  <script src="/composer.js"></script>
+  <script src="/tour.js"></script>
+  <script src="/resize.js"></script>
+</body>
+</html>

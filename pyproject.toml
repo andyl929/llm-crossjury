@@ -18,6 +18,17 @@ dependencies = [
     "typer>=0.12",
     "pyyaml>=6.0",
     "platformdirs>=4.0",
+    "anthropic>=2.6.0",
+    "google-genai>=3.0.0",
+    "openai>=3.46.0",
+    "fastapi>=0.162.2",
+    "uvicorn>=0.54.0",
+    "python-dotenv>=1.2.4",
+    "pypdf>=7.0.0",
+    "pdfplumber>=0.11.10",
+    "python-docx>=1.2.0",
+    "python-multipart>=0.0.33",
+    "pypdfium2>=5.15.1",
 ]
 
 [project.scripts]
@@ -37,6 +48,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-PyYAML>=6.0",
+    "httpx>=0.28.1",
 ]
 
 # --------------------------------------------------------------------------- pytest
@@ -77,6 +89,11 @@ python_version = "3.11"
 strict = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# pypdfium2 ships no type information (no py.typed marker).
+module = ["pypdfium2", "pypdfium2.*"]
+ignore_missing_imports = true
 
 [tool.pydantic-mypy]
 init_forbid_extra = true

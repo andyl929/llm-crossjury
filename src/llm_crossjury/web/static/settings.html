@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Settings - llm-crossjury</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/settings.css">
+  <script src="/theme.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-mark" viewBox="0 0 24 24"><path d="M4 3v7M9.33 3v7M14.67 3v7M20 3v7M4 10l8 6.5 8-6.5M12 16.5V21"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-system" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5v.01"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 10A8 8 0 0 0 5.2 7.3L4 9M4 4.5V9h4.5M4.5 14a8 8 0 0 0 14.3 2.7L20 15M20 19.5V15h-4.5"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <a class="brand" href="/">
+      <svg class="icon brand-mark" aria-hidden="true"><use href="#i-mark"/></svg>
+      <span class="brand-name">llm-crossjury</span>
+    </a>
+    <nav class="topnav" aria-label="Main">
+      <a href="/">Compare</a>
+      <a href="/settings" aria-current="page">Settings</a>
+    </nav>
+    <button id="theme-toggle" class="icon-btn theme-toggle" type="button" aria-label="Theme: system">
+      <svg class="icon" aria-hidden="true"><use href="#i-system"/></svg>
+    </button>
+  </header>
+
+  <main id="main" class="page settings-page" tabindex="-1">
+    <h1 class="visually-hidden">Settings</h1>
+
+    <section id="wizard" class="panel wizard" hidden aria-labelledby="wizard-title">
+      <div class="wizard-head">
+        <h2 id="wizard-title" class="panel-title">Set up llm-crossjury</h2>
+        <ol id="wizard-progress" class="wizard-progress" aria-label="Setup steps"></ol>
+      </div>
+
+      <div class="wizard-step" data-step="welcome">
+        <h3>Welcome</h3>
+        <p>llm-crossjury asks several AI models the same question, shows their answers side by side, and helps you combine them into one answer. First, connect at least one model.</p>
+        <fieldset class="path-choice">
+          <legend class="field-label">How do you want to connect models?</legend>
+          <label class="path-option">
+            <input type="radio" name="wizard-path" value="subs">
+            <span class="path-text"><strong>Use my subscriptions</strong><span class="help">Claude Pro or Max, ChatGPT Plus or Pro, or SuperGrok (experimental), through each vendor's command-line tool.</span></span>
+          </label>
+          <label class="path-option">
+            <input type="radio" name="wizard-path" value="keys">
+            <span class="path-text"><strong>Use API keys</strong><span class="help">Anthropic, OpenAI, Google Gemini or xAI.</span></span>
+          </label>
+          <label class="path-option">
+            <input type="radio" name="wizard-path" value="both" checked>
+            <span class="path-text"><strong>Both</strong><span class="help">Pick the backend per model when you ask.</span></span>
+          </label>
+        </fieldset>
+        <p class="help">Subscriptions have no per-call cost but use your plan's limits. API keys are paid per call, and you see the cost estimate before each run.</p>
+        <p class="help">Gemini works with an API key only: Google does not allow its consumer plans in third-party apps.</p>
+      </div>
+
+      <div class="wizard-step" data-step="subs" hidden>
+        <h3>Connect your subscriptions</h3>
+        <p>For each plan you have, install the vendor's tool and sign in once. The buttons run the vendor's official commands, only when you click; you can also run them yourself in a terminal. llm-crossjury never sees your password or sign-in token.</p>
+        <div class="os-switch" role="group" aria-label="Show commands for">
+          <button type="button" class="btn btn-small" data-os="windows" aria-pressed="false">Windows</button>
+          <button type="button" class="btn btn-small" data-os="unix" aria-pressed="false">macOS or Linux</button>
+        </div>
+        <div id="cli-rows" class="rack cli-rows">
+          <p class="help rack-loading">Checking&hellip;</p>
+        </div>
+        <p id="cli-tip" class="help cli-tip" hidden>Just installed it? If this page still says Not installed, restart llm-crossjury. Signing in by hand? Open a new terminal first, so the new command is found.</p>
+        <div class="actions">
+          <button id="cli-recheck" type="button" class="btn">
+            <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Check again
+          </button>
+          <span id="cli-status" class="status" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <div class="wizard-step" data-step="keys" hidden>
+        <h3>Add an API key</h3>
+        <p>Create a key on the vendor's site, paste it here and save. The test lists the vendor's models; it costs nothing.</p>
+        <form id="wizard-save-form" class="key-form" autocomplete="off">
+          <div class="field">
+            <label class="field-label" for="wizard-provider">Vendor</label>
+            <select id="wizard-provider"></select>
+            <p id="wizard-key-link" class="help"></p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="wizard-key">API key</label>
+            <input id="wizard-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the key here" aria-describedby="wizard-key-help">
+            <p id="wizard-key-help" class="help">Stored on this computer only, in your user settings folder. It is never shown again after saving.</p>
+          </div>
+          <div class="actions">
+            <button id="wizard-save" type="submit" class="btn btn-primary">Save and test</button>
+            <span id="wizard-save-status" class="status" aria-live="polite"></span>
+          </div>
+        </form>
+        <ul id="wizard-key-list" class="status-list" aria-label="API keys"></ul>
+      </div>
+
+      <div class="wizard-step" data-step="done" hidden>
+        <h3 id="wizard-done-title">Ready to go</h3>
+        <p id="wizard-done-intro"></p>
+        <ul id="wizard-summary" class="status-list" aria-label="Connected models"></ul>
+        <p>API runs stop at these limits. Change them under Settings, Budget.</p>
+        <dl id="wizard-budget" class="budget-list"></dl>
+        <div class="actions">
+          <button id="wizard-example" type="button" class="btn btn-primary">Start with an example</button>
+          <button id="wizard-finish" type="button" class="btn">Go to the app</button>
+        </div>
+        <p class="help">The example fills in a question and picks your models. Nothing runs until you click Ask, after you see the estimate.</p>
+      </div>
+
+      <div class="wizard-nav">
+        <button id="wizard-skip" type="button" class="btn btn-link">Skip setup</button>
+        <div class="actions">
+          <button id="wizard-back" type="button" class="btn">Back</button>
+          <button id="wizard-next" type="button" class="btn btn-primary">Next</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="keys-section" class="panel" aria-labelledby="keys-title">
+      <div class="panel-head keys-head">
+        <h2 id="keys-title" class="panel-title">API keys</h2>
+        <a id="open-wizard" class="btn" href="/settings?onboarding=1&amp;from=settings">Open setup wizard</a>
+      </div>
+      <p class="help keys-intro">A key can come from an environment variable, the <code>.env</code> file, a key file <code>.&lt;provider&gt;.key</code>, or be saved here. If several exist, that order decides which one is used.</p>
+      <div id="keys" class="rack keys">
+        <p class="help rack-loading">Loading&hellip;</p>
+      </div>
+      <p id="store-note" class="help store-note"></p>
+    </section>
+
+    <section id="subs-section" class="panel app-section" aria-labelledby="subs-title">
+      <h2 id="subs-title" class="panel-title">Subscriptions</h2>
+      <p class="help section-intro">Use Claude Code, Codex or Grok Build with your own plan instead of an API key. Install and Sign in run the vendor's official commands, only when you click.</p>
+      <div class="os-switch" role="group" aria-label="Show commands for">
+        <button type="button" class="btn btn-small" data-os="windows" aria-pressed="false">Windows</button>
+        <button type="button" class="btn btn-small" data-os="unix" aria-pressed="false">macOS or Linux</button>
+      </div>
+      <div id="subs-rows" class="rack cli-rows">
+        <p class="help rack-loading">Checking&hellip;</p>
+      </div>
+      <p id="subs-tip" class="help cli-tip" hidden>Just installed it? If this page still says Not installed, restart llm-crossjury.</p>
+      <div class="actions">
+        <button id="subs-recheck" type="button" class="btn">
+          <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Check again
+        </button>
+        <span id="subs-status" class="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section id="budget-section" class="panel app-section" aria-labelledby="budget-title">
+      <h2 id="budget-title" class="panel-title">Budget</h2>
+      <p class="help section-intro">Runs whose high estimate exceeds a limit are refused before any call is made. Amounts are in <span id="budget-currency">USD</span>.</p>
+      <form id="budget-form" class="app-form" autocomplete="off" novalidate>
+        <div class="app-fields">
+          <div class="field">
+            <label class="field-label" for="budget-run">Limit per run</label>
+            <input id="budget-run" type="number" inputmode="decimal" min="0.01" step="0.01" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="budget-daily">Daily limit</label>
+            <input id="budget-daily" type="number" inputmode="decimal" min="0.01" step="0.01" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="budget-confirm">Ask before runs above</label>
+            <input id="budget-confirm" type="number" inputmode="decimal" min="0" step="0.01" required>
+          </div>
+        </div>
+        <p id="budget-spent" class="help" aria-live="polite"></p>
+        <p id="budget-defaults" class="help"></p>
+        <div class="actions">
+          <button id="budget-save" type="submit" class="btn btn-primary">Save budget</button>
+          <button id="budget-reset" type="button" class="btn">Restore defaults</button>
+          <span id="budget-status" class="status" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+
+    <section id="history-section" class="panel app-section" aria-labelledby="history-title">
+      <h2 id="history-title" class="panel-title">History</h2>
+      <p class="help section-intro">Conversations are saved on this computer only, in your user data folder, readable only by your user account. Their text is sent only to the models you ask.</p>
+      <div class="app-form">
+        <label class="check-row" for="history-save">
+          <input id="history-save" type="checkbox">
+          <span>Save conversations on this computer</span>
+        </label>
+        <p class="help">When off, new conversations are kept in memory only and are lost when the server stops. Conversations saved earlier stay until you delete them.</p>
+        <div class="actions">
+          <span id="history-status" class="status" aria-live="polite"></span>
+        </div>
+        <div class="actions danger-zone">
+          <button id="history-clear" type="button" class="btn btn-danger">Delete all conversations</button>
+          <span id="history-clear-status" class="status" aria-live="polite"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="memory-section" class="panel app-section" aria-labelledby="memory-title">
+      <h2 id="memory-title" class="panel-title">Memory</h2>
+      <p class="help section-intro">In long conversations, a memory model writes short summaries of older turns, so each call sends a compact context instead of the whole transcript.</p>
+      <form id="memory-form" class="app-form" autocomplete="off" novalidate>
+        <div class="app-fields">
+          <div class="field">
+            <label class="field-label" for="memory-model">Memory model</label>
+            <select id="memory-model" aria-describedby="memory-model-help">
+              <option value="auto">Automatic</option>
+            </select>
+            <p id="memory-model-help" class="help">Automatic: a fast model on a signed-in subscription (no extra cost), else the cheapest fast model with an API key.</p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="memory-budget">Context budget (tokens)</label>
+            <input id="memory-budget" type="number" inputmode="numeric" min="8000" step="1000" required aria-describedby="memory-budget-help">
+            <p id="memory-budget-help" class="help">Upper bound on the context sent with one call; never more than the model's own window.</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="memory-save" type="submit" class="btn btn-primary">Save memory settings</button>
+          <span id="memory-status" class="status" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+
+    <div id="message" class="message" role="alert" hidden></div>
+  </main>
+
+  <script src="/settings.js"></script>
+</body>
+</html>

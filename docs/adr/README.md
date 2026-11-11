@@ -8,6 +8,8 @@
 | [0004](0004-document-mode-edit-list.md) | Document Review returns an edit list | Accepted |
 | [0005](0005-clean-room-and-license.md) | Clean-room implementation and MIT license | Accepted |
 | [0006](0006-model-registry.md) | Model registry, aliases and reasoning resolution | Accepted (supersedes 0001 rule 5) |
+| [0007](0007-attachments.md) | File attachments (PDF, Word, images) | Accepted (amends SPEC §9) |
+| [0008](0008-sessions-chat-memory.md) | Sessions, chat continuation and layered memory | Accepted (partly supersedes 0003 defaults) |
 
 Each ADR has these sections: Status, Context, Decision, Consequences, Alternatives.
 Change rules:

@@ -5,6 +5,9 @@
 - Amended: 2026-11-04 (pre-phase-1 decisions; see SPEC §10 Decided)
 - Amended: 2026-11-04 (clarification: prices now live in the model registry, ADR 0006;
   ring default k = 2)
+- Amended: 2026-11-09, ADR 0008 (the default limits below are now $5.00 per run,
+  confirmation above $1.00 and $15.00 per day, and the web UI's Settings page can
+  change them; the decision itself is unchanged)
 
 ## Context
 
@@ -33,6 +36,10 @@ by design. Prices change often, and anything hard-coded or remembered goes stale
 | `run_limit` | $1.00 | one run (hard) |
 | `confirm_above` | $0.25 | ask before a run whose high estimate exceeds this |
 | `daily_limit` | $5.00 | all runs on the local calendar day (hard) |
+
+Amended 2026-11-09 (ADR 0008): the defaults are now `run_limit` $5.00,
+`confirm_above` $1.00 and `daily_limit` $15.00, sized for the 32k output default, and
+the web UI's Settings page stores user values that replace them.
 
 The effective values and today's spend are printed at the start of every run.
 

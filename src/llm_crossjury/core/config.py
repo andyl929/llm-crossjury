@@ -57,15 +57,18 @@ class RolesConfig(BaseModel):
 
 
 class BudgetConfig(BaseModel):
-    """Spending limits. Defaults are deliberately small and always printed."""
+    """Spending limits. Defaults are general purpose and always printed (ADR 0003, 0008).
+
+    The web UI replaces the three limits with ``AppSettings.budget`` (Settings page).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    run_limit: Decimal = Decimal("1.00")
+    run_limit: Decimal = Decimal("5.00")
     """Hard cap per run."""
-    confirm_above: Decimal = Decimal("0.25")
+    confirm_above: Decimal = Decimal("1.00")
     """Ask for confirmation when the high estimate exceeds this amount."""
-    daily_limit: Decimal = Decimal("5.00")
+    daily_limit: Decimal = Decimal("15.00")
     """Hard cap on the ledger total per local calendar day, across runs."""
     currency: str = "USD"
     allow_unknown_cost: bool = False

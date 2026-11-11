@@ -24,9 +24,23 @@ def registry() -> ModelRegistryFile:
     return ModelRegistryFile.model_validate(raw)
 
 
-def test_no_real_models_shipped(registry: ModelRegistryFile) -> None:
-    # Facts must come from vendor docs, not from memory: the repo ships placeholders only.
+def test_shipped_entries_are_verified(registry: ModelRegistryFile) -> None:
+    # Facts come from vendor docs (ADR 0006): every shipped entry names its source and
+    # verification date; api entries carry a price; no placeholders.
+    assert registry.models
     for entry in registry.models:
+        assert entry.provider in ("anthropic", "openai", "gemini", "xai"), entry.model_id
+        assert not PLACEHOLDER.match(entry.model_id), entry.model_id
+        assert entry.source_url is not None, entry.model_id
+        assert entry.last_verified is not None, entry.model_id
+        if Backend.API in entry.backends:
+            assert entry.pricing is not None, entry.model_id
+
+
+def test_example_registry_is_fictitious() -> None:
+    raw = yaml.safe_load((REPO_ROOT / "config" / "models.example.yaml").read_text(encoding="utf-8"))
+    example = ModelRegistryFile.model_validate(raw)
+    for entry in example.models:
         assert entry.provider == "example"
         assert PLACEHOLDER.match(entry.model_id), entry.model_id
         assert entry.source_url is None

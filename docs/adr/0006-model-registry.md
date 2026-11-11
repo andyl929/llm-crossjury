@@ -6,6 +6,7 @@
   Amends: ADR 0003 §1 (the price source is now `config/models.yaml`).
 - Amended: 2026-11-04 (clarification: per-model multiplier override; `refresh --draft`;
   `CompletionRequest.reasoning` naming; SPEC items 22-24)
+- Amended: 2026-11-08 (ship verified entries, D-7)
 
 ## Context
 
@@ -35,9 +36,16 @@ so configs that name concrete ids go stale.
 | `source_url`, `last_verified` | Provenance. Without both, the entry is *unverified* and its pricing is never used |
 
 The schema (`core/registry/schema.py`) is a **contract file**. JSON Schemas for
-`models.yaml` and the run config are exported to `schemas/config/`. The repository
-ships only obviously fictitious example entries. No real model id, parameter or
-price is ever filled from memory.
+`models.yaml` and the run config are exported to `schemas/config/`. No real model
+id, parameter or price is ever filled from memory.
+
+*Amended 2026-11-08 (maintainer decision D-7):* the repository now ships **real,
+verified entries** in `config/models.yaml`, each with `source_url`, `last_verified`
+and notes citing the official pages, so a fresh install works. Tests require every
+shipped entry to be verified and every `api` entry to be priced. The fictitious
+entries that illustrate each reasoning-control type moved to
+`config/models.example.yaml`. `config/models.local.yaml` (git-ignored) and
+`LLM_CROSSJURY_MODELS` remain user overrides.
 
 ### 2. Aliases
 

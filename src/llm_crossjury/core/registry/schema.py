@@ -23,7 +23,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, HttpUrl
 
-from llm_crossjury.core.providers.base import Backend, ReasoningEffort
+from llm_crossjury.core.providers.base import AttachmentKind, Backend, ReasoningEffort
 
 NativeValue = str | int
 """A vendor-native reasoning value: a level name (``"high"``) or a budget (``8192``)."""
@@ -122,6 +122,10 @@ class ModelEntry(_Config):
     source_url: HttpUrl | None
     last_verified: date | None
     notes: str | None
+    input_modalities: tuple[AttachmentKind, ...] | None = None
+    """Attachment kinds the model accepts natively on the ``api`` backend, from the
+    vendor's model or feature docs (ADR 0007). ``None`` = not verified, treated as text
+    only (attachments are then sent as extracted text, and images are refused)."""
 
 
 class ProviderAliases(_Config):

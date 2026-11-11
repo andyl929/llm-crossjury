@@ -6,13 +6,21 @@ figures always show their currency and whether any part is unknown.
 
 from __future__ import annotations
 
+import os
+import tempfile
+import threading
+import webbrowser
 from pathlib import Path
 from typing import Annotated
 
 import typer
+import uvicorn
 
+from llm_crossjury.core.compare_service import build_default_deps
+from llm_crossjury.core.keys import PROVIDER_KEY_ENVS
 from llm_crossjury.core.modes import Mode
 from llm_crossjury.core.providers.base import Backend
+from llm_crossjury.web import LOOPBACK_HOSTS, create_app
 
 app = typer.Typer(
     name="llm-crossjury",
@@ -170,6 +178,82 @@ def models_refresh(
     """Compare the registry with each vendor's model-list endpoint and print the
     differences. Never edits config/models.yaml and spends no tokens."""
     raise NotImplementedError
+
+
+_WILDCARD_HOSTS = ("0.0.0.0", "::")  # noqa: S104 - compared against, never bound here
+_BROWSER_DELAY_S = 1.0
+
+
+@app.command()
+def ui(
+    host: Annotated[
+        str, typer.Option("--host", help="Interface to listen on. Keep the default (localhost).")
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="Port to listen on.")] = 8765,
+    no_browser: Annotated[
+        bool, typer.Option("--no-browser", help="Do not open the browser.")
+    ] = False,
+    demo: Annotated[
+        bool,
+        typer.Option(
+            "--demo",
+            help="Simulated models and canned answers: no keys, no network calls, no cost. "
+            "All state goes to a temporary directory that is deleted on exit.",
+        ),
+    ] = False,
+) -> None:
+    """Start the local compare web UI and open it in the browser.
+
+    Loads API keys from ./.env (never printed) and the model registry from config/.
+    With --demo, reads neither: see llm_crossjury.demo.
+    """
+    if host in _WILDCARD_HOSTS:
+        allowed: tuple[str, ...] = ("*",)
+    else:
+        allowed = (*LOOPBACK_HOSTS, host)
+    if host not in LOOPBACK_HOSTS:
+        typer.echo(
+            f"Warning: listening on {host}, not localhost. Anyone who can reach this "
+            "address can spend your API budget.",
+            err=True,
+        )
+    shown = "127.0.0.1" if host in _WILDCARD_HOSTS else host
+    url = f"http://[{shown}]:{port}/" if ":" in shown else f"http://{shown}:{port}/"
+    if demo:
+        _serve_demo(host, port, allowed, url, open_browser=not no_browser)
+        return
+    deps = build_default_deps(Path.cwd())
+    web_app = create_app(lambda: deps, allowed_hosts=allowed)
+    _serve(web_app, host, port, url, open_browser=not no_browser)
+
+
+def _serve(web_app: object, host: str, port: int, url: str, *, open_browser: bool) -> None:
+    typer.echo(f"llm-crossjury UI: {url} (Ctrl+C to stop)")
+    if open_browser:
+        timer = threading.Timer(_BROWSER_DELAY_S, webbrowser.open, args=(url,))
+        timer.daemon = True
+        timer.start()
+    uvicorn.run(web_app, host=host, port=port, log_level="warning")  # type: ignore[arg-type]
+
+
+def _serve_demo(
+    host: str, port: int, allowed: tuple[str, ...], url: str, *, open_browser: bool
+) -> None:
+    from llm_crossjury.demo import create_demo_app  # noqa: PLC0415 - only for --demo
+
+    # The demo process never needs an API key: drop any from its own environment so
+    # nothing real can show up on the settings page. Values are never read.
+    for env in PROVIDER_KEY_ENVS.values():
+        os.environ.pop(env, None)
+    with tempfile.TemporaryDirectory(
+        prefix="llm-crossjury-demo-", ignore_cleanup_errors=True
+    ) as tmp:
+        web_app = create_demo_app(Path(tmp), allowed_hosts=allowed)
+        typer.echo(
+            "Demo mode: simulated models and canned answers. No API keys, no network "
+            "calls, no cost."
+        )
+        _serve(web_app, host, port, url, open_browser=open_browser)
 
 
 def main() -> None:

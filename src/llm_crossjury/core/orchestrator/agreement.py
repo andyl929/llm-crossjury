@@ -22,8 +22,25 @@ if TYPE_CHECKING:
 
 
 def agreement_ratio(judgment: AgreementJudgment, kept_labels: Sequence[str]) -> float | None:
-    """Compute the agreement ratio as defined in the module docstring."""
-    raise NotImplementedError
+    """Compute the agreement ratio as defined in the module docstring.
+
+    Args:
+        judgment: The (validated) judge grouping.
+        kept_labels: Labels of all answers taken into account.
+
+    Returns:
+        The share of groups supported by every label in ``kept_labels`` and
+        contradicted by none, or ``None`` when there are no groups or no labels.
+    """
+    if not judgment.groups or not kept_labels:
+        return None
+    required = set(kept_labels)
+    agreed = sum(
+        1
+        for group in judgment.groups
+        if not group.contradicting and required <= {ref.label for ref in group.supporting}
+    )
+    return agreed / len(judgment.groups)
 
 
 class AgreementStage:

@@ -49,7 +49,7 @@ from `llm_crossjury`, except that `schemas.synthesis` imports `schemas.edits`.
 | `cli/app.py` | `llm-crossjury run / resume / cost estimate / cost report / providers check / models list / models refresh` |
 | `prompts/` | Versioned prompt templates (`<stage>.v<N>.md`), always in English |
 | `schemas/` | Generated `*.schema.json`. A test and CI fail when they drift from the models |
-| `config/` | `models.yaml` (registry; fictitious examples only, user-maintained) and `llm-crossjury.example.yaml` |
+| `config/` | `models.yaml` (shipped registry of verified entries), `models.example.yaml` (fictitious illustrations), `llm-crossjury.example.yaml` |
 | `scripts/` | Manual, possibly billed scripts. Never collected by pytest |
 | `.github/workflows/ci.yml` | ruff, mypy, pytest and the schema-drift check on Ubuntu + Windows × Python 3.11 + 3.12 |
 
@@ -189,10 +189,11 @@ No mode ever stores API keys, OAuth tokens, cookies, or CLI credential paths.
   anonymize, resolution, `output_language`, `models_path`, `store_content`,
   `checkpoint_retention_days` and `data_dir`. It contains no secrets and no model
   facts. A test checks that the example validates.
-- `config/models.yaml` is the model registry (ADR 0006). The repository ships only
-  fictitious example entries, and tests enforce that.
-- Budget defaults are built in ($1.00 per run, $0.25 confirmation threshold, $5.00
-  per day). The effective values are printed at the start of every run.
+- `config/models.yaml` is the model registry (ADR 0006). It ships verified entries
+  only (source URL and date on each); tests enforce that. `config/models.local.yaml`
+  overrides it locally.
+- Budget defaults are built in ($5.00 per run, $1.00 confirmation threshold, $15.00
+  per day; ADR 0008). The web UI's Settings page overrides them. The effective values are printed at the start of every run.
 - API keys come only from environment variables, which may be loaded from `.env`.
   They are read at call time inside the `api` adapter and never stored on objects that
   get printed, never written to the ledger or run records, and never forwarded to

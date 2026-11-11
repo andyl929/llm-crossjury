@@ -1,0 +1,100 @@
+# Model registry (ADR 0006). Single source for model ids, backends, reasoning
+# controls, CLI flags, limits and prices. Schema: schemas/config/ModelRegistryFile.schema.json
+#
+# RULES
+# - Copy every value from the vendor's official documentation at `source_url`, on the
+#   date in `last_verified`. Never fill a model id, parameter or price from memory.
+# - An entry without `source_url`/`last_verified` is unverified: it can be resolved,
+#   but its pricing is never used, so api runs that need it are refused.
+# - Prices: currency per 1,000,000 tokens; they apply to the `api` backend only.
+# - Models not listed here may still be configured, but only with reasoning `default`
+#   (and api runs need a verified price, so in practice they are cli-only).
+#
+# This file ships WITHOUT real models. The `example` provider below is fictitious
+# and only illustrates each reasoning-control type; replace it with real entries.
+
+schema_version: 1
+
+models:
+  - provider: example
+    model_id: "<example-levels-model>"
+    backends: [api, cli]
+    reasoning_control:
+      type: levels
+      parameter: "<native.effort.parameter>"
+      allowed: ["<native-a>", "<native-b>", "<native-c>"]
+      mapping: { low: "<native-a>", medium: "<native-b>", high: "<native-c>" }
+    cli_flags:
+      model: ["<--model-flag>", "{model}"]
+      reasoning: ["<--effort-flag>", "{value}"]
+    context_window: null
+    max_output: null
+    structured_output: null
+    pricing: null
+    reasoning_multipliers: null   # per-level override of cost.reasoning_multipliers
+    source_url: null
+    last_verified: null
+    notes: "EXAMPLE ONLY: not a real model."
+
+  - provider: example
+    model_id: "<example-budget-model>"
+    backends: [api]
+    reasoning_control:
+      type: budget
+      parameter: "<native.budget.parameter>"
+      allowed: [0, 0]              # (min, max) from the vendor docs
+      mapping: { low: 0, medium: 0, high: 0 }
+    cli_flags: null
+    context_window: null
+    max_output: null
+    structured_output: null
+    pricing:                       # shape only; zeros are placeholders, never used
+      currency: USD                # because this entry is unverified
+      input_per_mtok: "0"
+      output_per_mtok: "0"
+      cached_input_per_mtok: null
+      cache_write_per_mtok: null
+      reasoning_per_mtok: null
+      batch_multiplier: null
+    reasoning_multipliers: null   # per-level override of cost.reasoning_multipliers
+    source_url: null
+    last_verified: null
+    notes: "EXAMPLE ONLY: not a real model."
+
+  - provider: example
+    model_id: "<example-always-on-model>"
+    backends: [api]
+    reasoning_control: { type: always_on, parameter: null, allowed: null, mapping: null }
+    cli_flags: null
+    context_window: null
+    max_output: null
+    structured_output: null
+    pricing: null
+    reasoning_multipliers: null   # per-level override of cost.reasoning_multipliers
+    source_url: null
+    last_verified: null
+    notes: "EXAMPLE ONLY: not a real model."
+
+  - provider: example
+    model_id: "<example-no-reasoning-model>"
+    backends: [api]
+    reasoning_control: { type: none, parameter: null, allowed: null, mapping: null }
+    cli_flags: null
+    context_window: null
+    max_output: null
+    structured_output: null
+    pricing: null
+    reasoning_multipliers: null   # per-level override of cost.reasoning_multipliers
+    source_url: null
+    last_verified: null
+    notes: "EXAMPLE ONLY: not a real model."
+
+aliases:
+  anthropic: { fast: null, balanced: null, best: null }
+  openai:    { fast: null, balanced: null, best: null }
+  gemini:    { fast: null, balanced: null, best: null }
+  xai:       { fast: null, balanced: null, best: null }
+  example:
+    fast: "<example-no-reasoning-model>"
+    balanced: "<example-budget-model>"
+    best: "<example-levels-model>"
