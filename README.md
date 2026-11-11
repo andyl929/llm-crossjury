@@ -347,7 +347,8 @@ commands are placeholders.
 
 Planned next: a PyPI package, desktop builds and streaming answers
 ([full roadmap](docs/ROADMAP.md)). Issues and pull requests are welcome; see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). Please report security problems privately, as
+described in [SECURITY.md](SECURITY.md).
 
 ## License
 
