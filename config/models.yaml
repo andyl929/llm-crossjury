@@ -302,6 +302,42 @@ models:
       https://aistudio.google.com/docs/thinking?generate-content=true,
       https://aistudio.google.com/docs/gemini-3?generate-content=true.
 
+  - provider: gemini
+    model_id: "gemini-4-carbon"
+    input_modalities: [image, pdf]   # verified 2026-11-11: aistudio.google.com/docs/models/<id> (Inputs: Text, Image, Video, Audio, and PDF)
+    backends: [api]
+    reasoning_control:
+      type: levels
+      parameter: "thinking_config.thinking_level"
+      allowed: ["low", "medium", "high"]
+      mapping: { low: "low", medium: "medium", high: "high" }
+    cli_flags: null
+    context_window: 1048576
+    max_output: 65536
+    structured_output: true
+    pricing:
+      currency: USD
+      input_per_mtok: "2.00"
+      output_per_mtok: "10.00"
+      cached_input_per_mtok: "0.10"
+      cache_write_per_mtok: null
+      reasoning_per_mtok: null
+      batch_multiplier: "0.5"
+    reasoning_multipliers: null
+    source_url: "https://aistudio.google.com/docs/models/gemini-4-carbon"
+    last_verified: 2026-11-11
+    notes: >-
+      Stable (released 2026-11-10); Google's most capable reasoning model (Argon is the
+      faster, cheaper-per-turn sibling at the same token prices). Thinking levels low /
+      medium (default) / high; "minimal" unsupported. Context window 1,048,576 is
+      input+output combined. max_output 65,536 is the synchronous default; up to 1,048,576
+      with "long decode" (not modelled). Implicit caching only. Not on the free tier. PRICE
+      CHANGE SCHEDULED: prices here are valid through 2026-11-30; from 2026-12-01 Standard
+      is input 4.00 / output 20.00 / cache 0.20. No prompt-length tiers. Output price
+      includes thinking tokens. batch_multiplier from listed Batch prices (exactly 50%).
+      Sources: https://aistudio.google.com/docs/pricing,
+      https://aistudio.google.com/docs/gemini-3?generate-content=true.
+
   # ------------------------------------------------------------------- openai
   - provider: openai
     model_id: "gpt-6-luna"
@@ -498,7 +534,7 @@ aliases:
   gemini:
     fast: "gemini-3.5-flash-lite"
     balanced: "gemini-3.8-flash"
-    best: "gemini-4-argon"
+    best: "gemini-4-carbon"
   openai:
     fast: "gpt-6-luna"
     balanced: "gpt-6.1-sol"
