@@ -8,6 +8,7 @@ Windows, a ``#!/bin/sh`` script elsewhere).
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import os
 import stat
@@ -346,6 +347,7 @@ def test_run_cli_output_cap_raises(fake: FakeCli) -> None:
     fake.set(mode="flood")
     with temp_workspace() as cwd, pytest.raises(ProviderError, match="output rejected"):
         asyncio.run(run_cli(fake.invocation(cwd, cap=100_000)))
+    gc.collect()  # a leaked process transport warns here, in this test, not a later one
 
 
 def test_run_cli_timeout_kills_process_tree(fake: FakeCli) -> None:
@@ -360,6 +362,7 @@ def test_run_cli_timeout_kills_process_tree(fake: FakeCli) -> None:
     first = heartbeat.read_text(encoding="utf-8")
     time.sleep(0.6)
     assert heartbeat.read_text(encoding="utf-8") == first, "grandchild still running"
+    gc.collect()  # a leaked process transport warns here, in this test, not a later one
 
 
 def test_run_cli_unstartable_executable(tmp_path: Path) -> None:

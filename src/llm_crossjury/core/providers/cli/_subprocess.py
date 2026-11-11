@@ -463,16 +463,20 @@ async def run_cli(
 
     async def communicate() -> tuple[bytes, bytes, int]:
         feeder = asyncio.create_task(_feed_stdin(proc, invocation.stdin_text.encode("utf-8")))
+        readers = (
+            asyncio.create_task(_read_capped(proc.stdout, invocation.max_output_bytes)),
+            asyncio.create_task(_read_discarding(proc.stderr, MAX_STDERR_BYTES)),
+        )
         try:
-            out, err = await asyncio.gather(
-                _read_capped(proc.stdout, invocation.max_output_bytes),
-                _read_discarding(proc.stderr, MAX_STDERR_BYTES),
-            )
+            out, err = await asyncio.gather(*readers)
             code = await proc.wait()
         finally:
-            feeder.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await feeder
+            # gather() does not cancel the other reader when one fails (output cap):
+            # a reader left running would make the reaping communicate() below fail
+            # and leak the process transport.
+            for task in (feeder, *readers):
+                task.cancel()
+            await asyncio.gather(feeder, *readers, return_exceptions=True)
         return out, err, code
 
     try:
@@ -501,6 +505,9 @@ async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
     # the transports see EOF and close; discard it unread.
     with contextlib.suppress(Exception):
         await asyncio.wait_for(proc.communicate(), timeout=10)
+    # Reap even if draining failed, so the transport does not outlive the event loop.
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(proc.wait(), timeout=5)
 
 
 def render_transcript(messages: Sequence[Message]) -> str:
