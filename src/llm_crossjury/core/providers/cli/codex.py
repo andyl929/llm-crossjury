@@ -146,6 +146,11 @@ LOCKDOWN_OVERRIDES: tuple[str, ...] = (
     "features.memories=false",
     "features.browser_use=false",
     "features.computer_use=false",
+    # Built-in tools on by default in 0.167.0 (codex-rs/features/src/lib.rs); verified
+    # 2026-11-11 that they leave the exec tool list. The built-in "clock" MCP server
+    # (clock__curr_time) has no switch; a call to it is caught by TOOL_ITEM_TYPES.
+    "features.sleep_tool=false",
+    "features.image_generation=false",
     "project_doc_max_bytes=0",
 )
 """``-c`` overrides that disable every tool, connector and side channel (ADR 0002
