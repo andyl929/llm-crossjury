@@ -94,8 +94,10 @@ from llm_crossjury.core.providers.cli._subprocess import (
 MAX_TURNS_TEXT = 1
 """A free-text answer is a single model turn (no tools are available)."""
 
-MAX_TURNS_SCHEMA = 3
-"""``StructuredOutput`` tool call, its result, plus one validation retry."""
+MAX_TURNS_SCHEMA = 5
+"""``StructuredOutput`` tool call and its result, plus room for validation retries.
+Three turns failed about 1 in 50 chair calls in the M1.7 eval (``error_max_turns``);
+no other tool is available, so extra turns cannot do anything else."""
 
 MAX_ARGV_SCHEMA_CHARS = 8000
 """Longer schemas use the prompt fallback (Windows limits a command line to 32767
