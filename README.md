@@ -294,6 +294,25 @@ Answers are capped at 32,000 output tokens by default (change it per model under
 Tools built around one model, such as coding agents, fit better when you want a model to
 act on your files or code. llm-crossjury is for checking and combining answers.
 
+## Does it help? A small check
+
+We ran 50 GPQA Diamond (graduate-level science) and 50 SimpleQA (short facts)
+questions through four models (Claude Sonnet 5.5, GPT-6.1 Sol, Grok 4.7, Gemini 3.8
+Flash) and the synthesis, mostly on subscriptions
+(USD 1.10 of API spend in total).
+
+| | GPQA Diamond | SimpleQA |
+|---|---:|---:|
+| Best single model, picked after the fact | 94% (Claude) | 78% (Gemini) |
+| Majority vote of the four | 92% | 70% |
+| crossjury synthesis | 92% | 80% |
+| Wrong answers among those **not** flagged as disputed | **0 of 35** | 1 of 9 |
+
+The synthesis kept up with the best model without you having to know which one that
+is (it changes per task), and on GPQA every wrong answer carried a flag. On SimpleQA
+most answers are flagged, so the flag helps less there. Fifty questions per set is a
+small sample: method, cost and limitations are in [docs/evals.md](docs/evals.md).
+
 ## Supported models
 
 From [`config/models.yaml`](config/models.yaml), checked against the vendors' pages on

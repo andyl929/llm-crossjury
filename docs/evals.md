@@ -1,11 +1,13 @@
 # Does crossjury help? A small public eval (M1.7)
 
-> **Status: results TBD.** The harness is ready and a 6-question pilot has run (see
-> *Pilot* below). Every number marked **TBD** is filled in only after the full run.
-> Pilot numbers are about cost and time only. They are not evidence of accuracy.
+> **Status:** full run done on 2026-11-11/12 (50 GPQA Diamond + 50 SimpleQA questions,
+> USD 1.10 of API spend). Short version: the synthesis matched the best single model
+> without knowing in advance which model that would be, and on GPQA every wrong final
+> answer was flagged while every unflagged answer was right. The samples are small;
+> read the limitations.
 
 This is a small, honest check. It is not a research study. With 50 questions per
-dataset, one accuracy point is two questions, so the 95% confidence interval on any
+dataset, one question is two accuracy points, so the 95% confidence interval on any
 accuracy is roughly ±14 points. Treat differences smaller than that as noise.
 
 ## What we measure
@@ -91,50 +93,72 @@ xAI member is grok-4.7 through the Grok CLI. The grader is from the same vendor 
 member and the chair; this can bias grading toward that vendor's phrasing.
 
 CLI versions are recorded in the run manifest (`manifest-*.json` in the output
-directory). Full run CLI versions: **TBD**.
+directory). Full run CLI versions: Claude Code 2.1.317, codex-cli 0.167.0, grok 1.0.77.
 
 ## Results
 
-Run date: **TBD**. Sample: **TBD** GPQA, **TBD** SimpleQA questions scored.
+Run date: 2026-11-11 to 2026-11-12. Sample: 50 GPQA Diamond and 50 SimpleQA questions,
+all scored.
+
+The first pass had failures on 15 questions: grok-4.7 timed out (900 s) on 9 GPQA
+items, codex discarded 5 SimpleQA answers because it called a built-in tool, and the
+Claude Code chair hit its turn limit twice. These 15 questions were run once more with
+`--retry-failures` (after raising the Claude Code structured-output turn limit; the
+codex fix came later). Remaining member failures, counted as wrong for that member:
+grok-4.7 5 on GPQA and 2 on SimpleQA, gpt-6.1-sol 3 on SimpleQA, claude-sonnet-5-5 1 on
+GPQA. No synthesis failed in the final results.
 
 ### GPQA Diamond (accuracy)
 
 | System | Accuracy |
 |---|---:|
-| claude-sonnet-5-5 (cli) | TBD |
-| gpt-6.1-sol (cli) | TBD |
-| grok-4.7 (cli) | TBD |
-| gemini-3.8-flash (api) | TBD |
-| Best single member | TBD |
-| Majority vote | TBD |
-| crossjury synthesis | TBD |
+| claude-sonnet-5-5 (cli) | 94% |
+| gpt-6.1-sol (cli) | 90% |
+| grok-4.7 (cli) | 88% |
+| gemini-3.8-flash (api) | 92% |
+| Best single member (claude-sonnet-5-5) | 94% |
+| Majority vote | 92% |
+| **crossjury synthesis** | **92%** |
 
 ### SimpleQA (accuracy = share graded correct)
 
 | System | Accuracy |
 |---|---:|
-| claude-sonnet-5-5 (cli) | TBD |
-| gpt-6.1-sol (cli) | TBD |
-| grok-4.7 (cli) | TBD |
-| gemini-3.8-flash (api) | TBD |
-| Best single member | TBD |
-| Majority vote | TBD |
-| crossjury synthesis | TBD |
+| claude-sonnet-5-5 (cli) | 60% |
+| gpt-6.1-sol (cli) | 76% |
+| grok-4.7 (cli) | 66% |
+| gemini-3.8-flash (api) | 78% |
+| Best single member (gemini-3.8-flash) | 78% |
+| Majority vote | 70% |
+| **crossjury synthesis** | **80%** |
+
+The best single model differs by dataset (Claude on GPQA, Gemini on SimpleQA, where
+Claude has the lowest score). The synthesis stays within one question of the best
+model on both, and is 10 points above the majority vote on SimpleQA.
 
 ### Flag precision (headline)
 
+Flag = the synthesis shows a disputed point or a possibly-wrong item.
+
 | Dataset | Coverage (% flagged) | Error rate, flagged | Error rate, unflagged | Errors caught |
 |---|---:|---:|---:|---:|
-| GPQA Diamond | TBD | TBD | TBD | TBD |
-| SimpleQA | TBD | TBD | TBD | TBD |
+| GPQA Diamond | 30% (15 of 50) | 27% (4 of 15) | **0% (0 of 35)** | 100% (4 of 4) |
+| SimpleQA | 82% (41 of 50) | 22% (9 of 41) | 11% (1 of 9) | 90% (9 of 10) |
+
+On GPQA the flag does what it is meant to do: reading only the flagged 30% of answers
+would have found every wrong one. On SimpleQA almost everything is flagged, so the flag
+says little there. Of the alternative rules, "chair disputed" is the most selective
+(GPQA: 10% flagged, 60% of them wrong; SimpleQA: 44% flagged, 27% vs 14% error rate),
+and "agreement ratio below 0.8" flags nearly every question on both datasets, as the
+pilot suggested.
 
 ### Cost and time
 
 | | GPQA | SimpleQA |
 |---|---:|---:|
-| API spend (USD, Gemini only) | TBD | TBD |
-| CLI (subscription) calls | TBD | TBD |
-| Wall time per question (median) | TBD | TBD |
+| API spend (USD, Gemini member and its reviewer, incl. reruns) | 0.80 | 0.31 |
+| CLI (subscription) calls, incl. reruns | 448 | 685 (incl. grader calls) |
+| Wall time per question (median / max) | 139 s / 1,125 s | 68 s / 397 s |
 
 ## Pilot (cost and time only)
 
@@ -168,10 +192,16 @@ below 0.8" flag may therefore flag almost every GPQA question.
 
 ## Where crossjury does not help
 
-**TBD after the full run.** This section will list, with counts: questions where the
-synthesis was wrong but the majority or the best member was right; flag rules that do
-not separate right from wrong answers; and the cost and latency overhead against a
-single member.
+- **Accuracy where the models are already strong.** On GPQA all four models are already at
+  88-94%. The synthesis was right on 2 questions where the best model was wrong and
+  wrong on 3 where it was right; against the majority vote it was 1 and 1. There is no
+  accuracy gain to claim there.
+- **Flags on obscure facts.** On SimpleQA 82% of answers are flagged, because the
+  models disagree or hedge on most obscure facts. The flag still separates (22% vs 11%
+  error rate) but is too broad to save much checking.
+- **Cost and latency.** One question costs four member calls plus the agreement,
+  review and chair calls (8 calls on GPQA), and the answer waits for the slowest
+  member: here grok-4.7, which took up to 15 minutes on hard GPQA items.
 
 ## Limitations
 
@@ -181,7 +211,8 @@ single member.
 - One grader model, from the same vendor as a member and the chair.
 - Subscription CLIs run with the vendor's own defaults (reasoning level, system
   prompt additions); their model versions can change without notice.
-- Each question is run once; model sampling noise is not measured.
+- Each question is run once (15 with failures twice); model sampling noise is not
+  measured.
 - Flags are judged at question level: a flag counts as "right" when the final answer
   is wrong, even if the flagged point is not the reason it is wrong.
 - SimpleQA asks for short facts without web access; it measures recall and hedging,
