@@ -15,9 +15,8 @@
   <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg" alt="Python 3.11 and 3.12">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Windows, macOS and Linux">
   <img src="https://img.shields.io/badge/runs-locally-2E7D4F.svg" alt="Runs locally">
-  <!-- When the repository is public, add the CI badge:
   <a href="https://github.com/andyl929/llm-crossjury/actions/workflows/ci.yml"><img src="https://github.com/andyl929/llm-crossjury/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  and, after the first PyPI release, a PyPI version badge. -->
+  <!-- After the first PyPI release, add a PyPI version badge. -->
 </p>
 
 <p align="center">
