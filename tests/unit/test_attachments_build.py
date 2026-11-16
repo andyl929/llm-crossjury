@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import time
 from collections.abc import Callable
@@ -163,6 +164,14 @@ def test_isolated_timeout_kills_worker() -> None:
     with pytest.raises(AttachmentTimeoutError, match="longer than"):
         isolate.run_isolated(time.sleep, (60,), 0.5)
     assert time.monotonic() - started < 15
+
+
+def test_isolated_worker_keeps_parser_warnings_off_the_console(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    # pypdf logs "Ignoring wrong pointing object ..." for each defect of a malformed PDF.
+    assert isolate.run_isolated(logging.warning, ("Ignoring wrong pointing object",), 30) is None
+    assert "Ignoring" not in capfd.readouterr().err
 
 
 def test_isolated_crash() -> None:

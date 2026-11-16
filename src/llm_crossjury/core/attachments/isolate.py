@@ -9,6 +9,7 @@ and kills the worker afterwards. The call blocks: async callers should wrap it i
 
 from __future__ import annotations
 
+import logging
 import multiprocessing
 from collections.abc import Callable
 from multiprocessing.connection import Connection
@@ -84,6 +85,11 @@ def run_isolated(func: Callable[..., T], args: tuple[object, ...], timeout_s: fl
 
 def _worker(conn: Connection, func: Callable[..., object], args: tuple[object, ...]) -> None:
     """Worker entry point: run ``func`` and send ``(status, payload, message)``."""
+    # Parsers (pypdf, pdfminer) log a warning for every recoverable defect of a
+    # malformed file. The worker has no logging setup, so Python's last-resort handler
+    # would print each one to the console. The outcome reaches the user as the result
+    # or an error instead.
+    logging.disable(logging.WARNING)
     try:
         result = func(*args)
     except AttachmentError as exc:
