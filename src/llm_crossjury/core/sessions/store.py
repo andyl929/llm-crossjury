@@ -24,7 +24,7 @@ import re
 import threading
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -62,6 +62,11 @@ def new_id() -> str:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+_TICK = timedelta(microseconds=1)
+"""Smallest step that keeps ``updated_at`` strictly increasing. Python 3.11 on Windows
+reads the clock at about 15 ms resolution, so two writes can share a timestamp."""
 
 
 class _Cached:
@@ -191,7 +196,9 @@ class SessionStore:
     def update(self, session_id: str, fn: Callable[[Session], Session]) -> Session:
         """Apply ``fn`` to the latest version under the session's lock and save it.
 
-        ``updated_at`` is set to now. ``fn`` must not change the id.
+        ``updated_at`` is set to now, and always moves past its previous value, so the
+        session just updated sorts first even when the clock has not ticked.
+        ``fn`` must not change the id.
 
         Raises:
             SessionNotFoundError: no such session.
@@ -202,7 +209,8 @@ class SessionStore:
             changed = fn(current)
             if changed.id != current.id:
                 raise ValueError("a session update must not change the session id")
-            changed = changed.model_copy(update={"updated_at": max(_now(), current.updated_at)})
+            stamp = max(_now(), current.updated_at + _TICK)
+            changed = changed.model_copy(update={"updated_at": stamp})
             self._save(changed)
             return changed
 
