@@ -1,0 +1,51 @@
+name: Bug report
+description: Something does not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please never paste an API key, a `keys.env` or `.env` file,
+        or a CLI sign-in file here. For a security problem, use **Security > Report a
+        vulnerability** instead of an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start `llm-crossjury ui`
+        2. Select ...
+        3. Click ...
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Which mode
+      multiple: true
+      options:
+        - API key
+        - Subscription (vendor CLI)
+        - Demo mode
+        - Not sure
+  - type: input
+    id: models
+    attributes:
+      label: Models involved
+      placeholder: e.g. claude-sonnet-5-5 (subscription), gemini-3.8-flash (API)
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: e.g. Windows 11, Python 3.12, commit abc1234, Edge
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error message or log
+      description: Check that it contains no key or personal data before posting.
+      render: text

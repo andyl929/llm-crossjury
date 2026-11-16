@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import llm_crossjury.core.sessions.store as store_module
 from llm_crossjury.core.sessions.interfaces import SessionNotFoundError
 from llm_crossjury.core.sessions.models import ChatTurn, JuryTurn, ModelRef, Session, TurnStatus
 from llm_crossjury.core.sessions.store import (
@@ -71,6 +72,18 @@ def test_create_get_list_roundtrip(tmp_path: Path) -> None:
     # a new store instance reads the same files
     again = SessionStore(tmp_path / "sessions")
     assert again.get(first.id).title == "First"
+
+
+def test_update_moves_past_a_frozen_clock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Python 3.11 on Windows reads the clock at ~15 ms, so writes can share a timestamp.
+    frozen = datetime(2026, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(store_module, "_now", lambda: frozen)
+    store = SessionStore(tmp_path / "sessions")
+    first = store.create("First")
+    second = store.create("Second")
+    updated = store.update(second.id, lambda s: s)
+    assert updated.updated_at > frozen
+    assert [r.id for r in store.list()] == [second.id, first.id]
 
 
 def test_update_bumps_updated_at_and_rejects_id_change(tmp_path: Path) -> None:

@@ -184,7 +184,7 @@ def test_schema_and_max_turns_still_apply_on_stream_path(fake_exe: None) -> None
         inv = provider.build_invocation(_request(IMAGE, schema=SCHEMA), cwd)
     assert "--input-format" in inv.args
     assert json.loads(inv.args[inv.args.index("--json-schema") + 1]) == SCHEMA
-    assert inv.args[inv.args.index("--max-turns") + 1] == "3"
+    assert inv.args[inv.args.index("--max-turns") + 1] == str(claude_code.MAX_TURNS_SCHEMA)
 
 
 def test_without_native_kinds_the_text_path_inlines_fallback(fake_exe: None) -> None:

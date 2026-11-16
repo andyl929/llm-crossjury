@@ -76,7 +76,10 @@ ready CLI); one-click install and sign-in from a fixed whitelist of the vendors'
 official commands, with copyable commands as the fallback (ADR 0002, amended
 2026-11-09); a four-step "How it works" tour on the home page.
 
-### M1.7: Small public eval (queued, after M1.6; hard cap $5-10)
+### M1.7: Small public eval (done 2026-11-12)
+
+Done: 50 GPQA Diamond + 50 SimpleQA, USD 1.10 of API spend; results in
+[docs/evals.md](evals.md) and a short README section. Original plan below.
 
 Goal: honest evidence that crossjury helps, not a research study.
 

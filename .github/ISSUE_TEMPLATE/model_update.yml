@@ -1,0 +1,27 @@
+name: New or changed model
+description: A vendor released a model, changed a price, or retired one.
+labels: [models]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Model facts live in `config/models.yaml`, and every entry needs an official
+        source link. Third-party price lists are not enough.
+  - type: input
+    id: model
+    attributes:
+      label: Vendor and model id
+      placeholder: e.g. gemini / gemini-4-carbon
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Official source (model page or pricing page)
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: What changed
+      description: New model, price, context window, modalities, retirement date, ...
